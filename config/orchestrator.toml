@@ -1,0 +1,118 @@
+# Mail Orchestrator Configuration
+# Domain-agnostic email orchestration for Postfix + Dovecot servers.
+# Updated for dual-domain split: sacred.vote (platform) + sacredvote.org (legal/org)
+
+[daemon]
+pid_file = "/run/mail-orchestrator/orchestrator.pid"
+db_path = "/var/lib/mail-orchestrator/orchestrator.db"
+log_level = "info"
+
+[domain]
+name = "sacred.vote"
+mail_base = "/var/mail/vhosts/sacred.vote"
+smtp_host = "127.0.0.1"
+smtp_port = 25
+
+[templates]
+dir = "/etc/mail-orchestrator/templates"
+
+# ── Router — process command emails ──
+
+[router]
+mailbox = "router"
+maildir = "/var/mail/vhosts/sacred.vote/router/Maildir/new/"
+authorized_senders = [
+    "tim@sacred.vote",
+    "william@plausiden.com",
+]
+allowed_from = [
+    "admin@sacred.vote",
+    "noreply@sacred.vote",
+    "alerts@sacred.vote",
+    "support@sacred.vote",
+    "contact@sacred.vote",
+    "info@sacred.vote",
+    "security@sacredvote.org",
+    "legal@sacredvote.org",
+    "privacy@sacredvote.org",
+]
+
+# ── Notification routing — alert subscribers when mail arrives ──
+
+# === sacred.vote platform mailboxes ===
+
+[notify.support]
+mailbox = "support@sacred.vote"
+maildir = "/var/mail/vhosts/sacred.vote/support/Maildir/new/"
+subscribers = ["william@plausiden.com", "tim@sacred.vote"]
+priority = "normal"
+actions = ["email_notify", "create_ticket"]
+
+[notify.contact]
+mailbox = "contact@sacred.vote"
+maildir = "/var/mail/vhosts/sacred.vote/contact/Maildir/new/"
+subscribers = ["william@plausiden.com", "tim@sacred.vote"]
+priority = "normal"
+actions = ["email_notify"]
+
+[notify.info]
+mailbox = "info@sacred.vote"
+maildir = "/var/mail/vhosts/sacred.vote/info/Maildir/new/"
+subscribers = ["william@plausiden.com", "tim@sacred.vote"]
+priority = "low"
+actions = ["email_notify"]
+
+[notify.admin]
+mailbox = "admin@sacred.vote"
+maildir = "/var/mail/vhosts/sacred.vote/admin/Maildir/new/"
+subscribers = ["william@plausiden.com"]
+priority = "normal"
+actions = ["email_notify", "shield_alert"]
+
+[notify.alerts]
+mailbox = "alerts@sacred.vote"
+maildir = "/var/mail/vhosts/sacred.vote/alerts/Maildir/new/"
+subscribers = ["william@plausiden.com", "tim@sacred.vote"]
+priority = "normal"
+actions = ["email_notify"]
+
+[notify.noreply]
+mailbox = "noreply@sacred.vote"
+maildir = "/var/mail/vhosts/sacred.vote/noreply/Maildir/new/"
+subscribers = ["william@plausiden.com"]
+priority = "low"
+actions = ["log_only"]
+
+# === sacredvote.org organizational mailboxes ===
+
+[notify.security]
+mailbox = "security@sacredvote.org"
+maildir = "/var/mail/vhosts/sacredvote.org/security/Maildir/new/"
+subscribers = ["william@plausiden.com", "tim@sacred.vote"]
+priority = "critical"
+actions = ["email_notify", "shield_alert"]
+
+[notify.legal]
+mailbox = "legal@sacredvote.org"
+maildir = "/var/mail/vhosts/sacredvote.org/legal/Maildir/new/"
+subscribers = ["william@plausiden.com"]
+priority = "high"
+actions = ["email_notify"]
+
+[notify.privacy]
+mailbox = "privacy@sacredvote.org"
+maildir = "/var/mail/vhosts/sacredvote.org/privacy/Maildir/new/"
+subscribers = ["william@plausiden.com"]
+priority = "high"
+actions = ["email_notify"]
+
+# ── Scheduled emails ──
+
+# [[schedule]]
+# name = "weekly_security_digest"
+# from = "security@sacredvote.org"
+# to = ["tim@sacred.vote", "william@plausiden.com"]
+# subject = "Weekly Security Digest"
+# template = "security_digest"
+# cron = "0 9 * * 1"
+# enabled = true

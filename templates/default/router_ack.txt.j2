@@ -1,0 +1,12 @@
+Your router command has been processed.
+
+Action: Send email
+From: {{ from }}
+To: {{ to }}
+Subject: {{ subject }}
+{% if scheduled_at %}Scheduled: {{ scheduled_at }}
+{% endif %}Status: {{ status }}
+Tracking ID: {{ tracking_id }}
+
+---
+This is an automated confirmation from Mail Orchestrator.
