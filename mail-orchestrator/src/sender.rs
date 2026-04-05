@@ -66,6 +66,7 @@ impl Sender {
     }
 
     /// Send a notification email about a new message in a service mailbox.
+    #[allow(clippy::too_many_arguments)]
     pub fn send_notification(
         &self,
         from_identity: &str,

@@ -58,3 +58,6 @@ regex = "1"
 
 # Serialization
 serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

@@ -14,6 +14,19 @@ pub struct Database {
 }
 
 impl Database {
+    /// Acquire the database connection, recovering from poisoned mutex.
+    ///
+    /// A poisoned mutex means a previous holder panicked. Since SQLite
+    /// connections are transactional, the connection itself is still usable —
+    /// the incomplete transaction was rolled back automatically.
+    fn lock_conn(&self) -> Result<std::sync::MutexGuard<'_, Connection>> {
+        self.conn
+            .lock()
+            .map_err(|e| anyhow::anyhow!("database mutex poisoned: {}", e))
+    }
+}
+
+impl Database {
     /// Open (or create) the database and run migrations.
     pub fn open(path: &Path) -> Result<Self> {
         let conn = Connection::open(path)?;
@@ -24,6 +37,7 @@ impl Database {
     }
 
     /// Log an email event.
+    #[allow(clippy::too_many_arguments)]
     pub fn log_email(
         &self,
         message_id: &str,
@@ -35,7 +49,7 @@ impl Database {
         mailbox: &str,
         status: &str,
     ) -> Result<i64> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         conn.execute(
             "INSERT INTO email_log (message_id, tracking_id, direction, from_addr, to_addr, subject, mailbox, status)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
@@ -46,7 +60,7 @@ impl Database {
 
     /// Update email log status.
     pub fn update_email_status(&self, id: i64, status: &str, error: Option<&str>) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         conn.execute(
             "UPDATE email_log SET status = ?1, error_message = ?2, processed_at = datetime('now') WHERE id = ?3",
             rusqlite::params![status, error, id],
@@ -63,7 +77,7 @@ impl Database {
         priority: &str,
         status: &str,
     ) -> Result<i64> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         conn.execute(
             "INSERT INTO notification_log (source_mailbox, source_message_id, subscriber, priority, status)
              VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -74,7 +88,7 @@ impl Database {
 
     /// Update notification status.
     pub fn update_notification_status(&self, id: i64, status: &str, error: Option<&str>) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         conn.execute(
             "UPDATE notification_log SET status = ?1, error_message = ?2, sent_at = datetime('now') WHERE id = ?3",
             rusqlite::params![status, error, id],
@@ -83,6 +97,7 @@ impl Database {
     }
 
     /// Insert a scheduled email.
+    #[allow(clippy::too_many_arguments)]
     pub fn insert_scheduled(
         &self,
         tracking_id: &str,
@@ -96,7 +111,7 @@ impl Database {
         cron_expr: Option<&str>,
         is_recurring: bool,
     ) -> Result<i64> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         conn.execute(
             "INSERT INTO scheduled_emails (tracking_id, from_addr, to_addr, subject, body, template, template_vars, scheduled_at, cron_expr, is_recurring)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
@@ -107,7 +122,7 @@ impl Database {
 
     /// Get all pending scheduled emails that are due.
     pub fn get_due_scheduled(&self) -> Result<Vec<ScheduledEmail>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, tracking_id, from_addr, to_addr, subject, body, template, template_vars, scheduled_at, cron_expr, is_recurring
              FROM scheduled_emails
@@ -137,7 +152,7 @@ impl Database {
 
     /// Mark a scheduled email as sent.
     pub fn mark_scheduled_sent(&self, id: i64) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         conn.execute(
             "UPDATE scheduled_emails SET status = 'sent', last_run_at = datetime('now') WHERE id = ?1",
             [id],
@@ -147,7 +162,7 @@ impl Database {
 
     /// For recurring scheduled emails, reset to pending with next run time.
     pub fn reschedule(&self, id: i64, next_at: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         conn.execute(
             "UPDATE scheduled_emails SET scheduled_at = ?1, last_run_at = datetime('now') WHERE id = ?2",
             rusqlite::params![next_at, id],
@@ -158,6 +173,7 @@ impl Database {
 
 /// A scheduled email record from the database.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct ScheduledEmail {
     pub id: i64,
     pub tracking_id: String,

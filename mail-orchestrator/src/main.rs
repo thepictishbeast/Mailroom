@@ -13,6 +13,7 @@ mod notifier;
 mod parser;
 mod router;
 mod scheduler;
+pub mod templates;
 mod sender;
 mod watcher;
 
@@ -75,7 +76,8 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Write PID file
-    std::fs::write(&config.daemon.pid_file, std::process::id().to_string())?;
+    let pid_file_path = config.daemon.pid_file.clone();
+    std::fs::write(&pid_file_path, std::process::id().to_string())?;
 
     // Open database
     if let Some(parent) = config.daemon.db_path.parent() {
@@ -123,7 +125,7 @@ async fn main() -> anyhow::Result<()> {
     info!("Shutdown signal received, cleaning up...");
 
     // Clean up PID file
-    let _ = std::fs::remove_file(&Arc::try_unwrap(config).unwrap_or_else(|c| (*c).clone()).daemon.pid_file);
+    let _ = std::fs::remove_file(&pid_file_path);
 
     // Abort tasks
     scheduler_handle.abort();

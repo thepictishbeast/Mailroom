@@ -9,6 +9,7 @@ use std::path::Path;
 
 /// Parsed email with extracted fields.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ParsedEmail {
     pub message_id: String,
     pub from: String,

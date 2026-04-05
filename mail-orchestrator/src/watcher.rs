@@ -97,7 +97,8 @@ pub async fn watch_maildirs(config: Arc<Config>, db: Arc<Database>, sender: Arc<
         match parser::parse_email(&path) {
             Ok(email) => {
                 if mailbox_name == "router" {
-                    if let Err(e) = router::execute_command(&email, &config.router, &sender, &db) {
+                    let router_identity = format!("router@{}", config.domain.name);
+                    if let Err(e) = router::execute_command(&email, &config.router, &sender, &db, &router_identity) {
                         error!(error = %e, "Router command execution failed");
                     }
                 } else if let Some(notify_config) = config.notify.get(&mailbox_name) {

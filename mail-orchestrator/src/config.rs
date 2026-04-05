@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 /// Top-level orchestrator configuration.
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 pub struct Config {
     pub daemon: DaemonConfig,
     pub domain: DomainConfig,
@@ -22,6 +23,7 @@ pub struct Config {
 
 /// Daemon runtime settings.
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 pub struct DaemonConfig {
     pub pid_file: PathBuf,
     pub db_path: PathBuf,
@@ -31,6 +33,7 @@ pub struct DaemonConfig {
 
 /// Mail domain and server settings.
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 pub struct DomainConfig {
     pub name: String,
     pub mail_base: PathBuf,
@@ -42,6 +45,7 @@ pub struct DomainConfig {
 
 /// Router mailbox configuration.
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 pub struct RouterConfig {
     pub mailbox: String,
     pub maildir: PathBuf,
@@ -51,12 +55,14 @@ pub struct RouterConfig {
 
 /// Template engine configuration.
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 pub struct TemplateConfig {
     pub dir: PathBuf,
 }
 
 /// Per-mailbox notification routing.
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 pub struct NotifyConfig {
     pub mailbox: String,
     pub maildir: PathBuf,
@@ -69,6 +75,7 @@ pub struct NotifyConfig {
 
 /// Scheduled email definition.
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 pub struct ScheduleConfig {
     pub name: String,
     pub from: String,
@@ -92,6 +99,7 @@ impl Config {
     }
 
     /// Get all Maildir paths that should be watched (router + all notify mailboxes).
+    #[allow(dead_code)]
     pub fn watch_paths(&self) -> Vec<(String, PathBuf)> {
         let mut paths = vec![("router".to_string(), self.router.maildir.clone())];
         for (name, notify) in &self.notify {

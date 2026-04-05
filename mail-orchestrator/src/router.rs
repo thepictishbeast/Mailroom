@@ -96,6 +96,21 @@ pub fn parse_command(body: &str) -> Result<RouterCommand> {
         bail!("Router command missing SUBJECT: field");
     }
 
+    // Reject newlines in header fields to prevent SMTP header injection.
+    for (name, val) in [("TO", &to), ("FROM", &from), ("SUBJECT", &subject)] {
+        if val.contains('\n') || val.contains('\r') {
+            bail!("{} field contains illegal newline characters", name);
+        }
+    }
+
+    // Validate email addresses have basic structure.
+    if !to.contains('@') {
+        bail!("TO address missing @: {}", to);
+    }
+    if !from.contains('@') {
+        bail!("FROM address missing @: {}", from);
+    }
+
     Ok(RouterCommand {
         to,
         from,
@@ -108,11 +123,15 @@ pub fn parse_command(body: &str) -> Result<RouterCommand> {
 }
 
 /// Execute a router command: validate authorization, then send or schedule.
+///
+/// `router_identity` is the From: address for ack/error replies
+/// (e.g., "router@sacred.vote"). Derived from config domain at call site.
 pub fn execute_command(
     email: &ParsedEmail,
     config: &RouterConfig,
     sender: &Sender,
     db: &Database,
+    router_identity: &str,
 ) -> Result<()> {
     let sender_addr = extract_address(&email.from).to_lowercase();
     let tracking_id = Uuid::new_v4().to_string();
@@ -158,7 +177,7 @@ pub fn execute_command(
             )?;
             // Send error reply to sender
             let _ = sender.send_email(
-                "router@sacredvote.org",
+                router_identity,
                 Some("Mail Orchestrator"),
                 &sender_addr,
                 "Router Command Failed",
@@ -180,7 +199,7 @@ pub fn execute_command(
             "Router command requested unauthorized FROM identity"
         );
         let _ = sender.send_email(
-            "router@sacredvote.org",
+            router_identity,
             Some("Mail Orchestrator"),
             &sender_addr,
             "Router Command Rejected",
@@ -234,7 +253,7 @@ pub fn execute_command(
 
         // Send acknowledgment
         let _ = sender.send_email(
-            "router@sacredvote.org",
+            router_identity,
             Some("Mail Orchestrator"),
             &sender_addr,
             &format!("Scheduled: {}", cmd.subject),
@@ -280,7 +299,7 @@ pub fn execute_command(
 
             // Send acknowledgment
             let _ = sender.send_email(
-                "router@sacredvote.org",
+                router_identity,
                 Some("Mail Orchestrator"),
                 &sender_addr,
                 &format!("Sent: {}", cmd.subject),
@@ -298,4 +317,108 @@ pub fn execute_command(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_valid_command() {
+        let body = "TO: voter@example.com\nFROM: admin@sacred.vote\nSUBJECT: Welcome\n---\nHello there.";
+        let cmd = parse_command(body).unwrap();
+        assert_eq!(cmd.to, "voter@example.com");
+        assert_eq!(cmd.from, "admin@sacred.vote");
+        assert_eq!(cmd.subject, "Welcome");
+        assert_eq!(cmd.body, "Hello there.");
+        assert!(cmd.template.is_none());
+        assert!(cmd.schedule.is_none());
+    }
+
+    #[test]
+    fn parse_command_with_template_and_vars() {
+        let body = "TO: user@example.com\nFROM: noreply@sacred.vote\nSUBJECT: Verify\nTEMPLATE: verify_email\nVARS: name=Tim, code=ABC123\n---\n";
+        let cmd = parse_command(body).unwrap();
+        assert_eq!(cmd.template, Some("verify_email".to_string()));
+        assert_eq!(cmd.vars.get("name").unwrap(), "Tim");
+        assert_eq!(cmd.vars.get("code").unwrap(), "ABC123");
+    }
+
+    #[test]
+    fn parse_command_with_schedule() {
+        let body = "TO: user@example.com\nFROM: admin@sacred.vote\nSUBJECT: Reminder\nSCHEDULE: 2026-04-10T09:00:00Z\n---\nDon't forget!";
+        let cmd = parse_command(body).unwrap();
+        assert_eq!(cmd.schedule, Some("2026-04-10T09:00:00Z".to_string()));
+    }
+
+    #[test]
+    fn parse_command_missing_to() {
+        let body = "FROM: admin@sacred.vote\nSUBJECT: Test\n---\nBody";
+        assert!(parse_command(body).is_err());
+    }
+
+    #[test]
+    fn parse_command_missing_from() {
+        let body = "TO: user@example.com\nSUBJECT: Test\n---\nBody";
+        assert!(parse_command(body).is_err());
+    }
+
+    #[test]
+    fn parse_command_missing_subject() {
+        let body = "TO: user@example.com\nFROM: admin@sacred.vote\n---\nBody";
+        assert!(parse_command(body).is_err());
+    }
+
+    #[test]
+    fn line_based_parsing_prevents_header_injection() {
+        // The parser splits by lines first, so \r\nBcc:... becomes a separate
+        // line that doesn't match any command key — it's effectively ignored.
+        let body = "TO: user@example.com\r\nBcc: spy@evil.com\nFROM: admin@sacred.vote\nSUBJECT: Test\n---\n";
+        let cmd = parse_command(body).unwrap();
+        // The TO field should be clean — no injected headers
+        assert_eq!(cmd.to, "user@example.com");
+        assert!(!cmd.to.contains("Bcc"));
+    }
+
+    #[test]
+    fn unrecognized_keys_ignored() {
+        // "Injected: header" doesn't match TO/FROM/SUBJECT/TEMPLATE/VARS/SCHEDULE
+        let body = "TO: user@example.com\nFROM: admin@sacred.vote\nSUBJECT: Test\nInjected: header\n---\n";
+        let cmd = parse_command(body).unwrap();
+        assert_eq!(cmd.subject, "Test");
+    }
+
+    #[test]
+    fn reject_to_without_at() {
+        let body = "TO: notanemail\nFROM: admin@sacred.vote\nSUBJECT: Test\n---\nBody";
+        assert!(parse_command(body).is_err());
+    }
+
+    #[test]
+    fn reject_from_without_at() {
+        let body = "TO: user@example.com\nFROM: notanemail\nSUBJECT: Test\n---\nBody";
+        assert!(parse_command(body).is_err());
+    }
+
+    #[test]
+    fn multiline_body_preserved() {
+        let body = "TO: user@example.com\nFROM: admin@sacred.vote\nSUBJECT: Multi\n---\nLine 1\nLine 2\nLine 3";
+        let cmd = parse_command(body).unwrap();
+        assert!(cmd.body.contains("Line 1\nLine 2\nLine 3"));
+    }
+
+    #[test]
+    fn empty_body_is_ok() {
+        let body = "TO: user@example.com\nFROM: admin@sacred.vote\nSUBJECT: Empty\n---\n";
+        let cmd = parse_command(body).unwrap();
+        assert!(cmd.body.is_empty());
+    }
+
+    #[test]
+    fn vars_handles_whitespace() {
+        let body = "TO: u@e.com\nFROM: a@s.vote\nSUBJECT: V\nVARS:  key1 = val1 , key2 = val2 \n---\n";
+        let cmd = parse_command(body).unwrap();
+        assert_eq!(cmd.vars.get("key1").unwrap(), "val1");
+        assert_eq!(cmd.vars.get("key2").unwrap(), "val2");
+    }
 }
