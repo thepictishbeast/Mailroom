@@ -26,8 +26,11 @@ mail-parser = "0.9"
 # Email sending
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-rustls-tls", "builder", "hostname"] }
 
-# Maildir watching (inotify on Linux)
-notify = "7"
+# Maildir watching (inotify on Linux).
+# Pinned to v8: drops the unmaintained `instant` transitive via notify-types
+# (RUSTSEC-2024-0384). notify 9 is still pre-release (9.0.0-rc.2 as of
+# 2026-04-06) — hold until stable per AVP-2 "no pre-release deps" rule.
+notify = "8"
 
 # Database (audit log, delivery tracking)
 rusqlite = { version = "0.32", features = ["bundled", "serde_json"] }
