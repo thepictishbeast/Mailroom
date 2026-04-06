@@ -4,6 +4,8 @@
 //! DKIM status, health checks, and Postfix vmailbox management.
 //! Reads domain configuration from the orchestrator TOML file.
 
+#![forbid(unsafe_code)]
+
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use mail_config::{Domain, Mailbox, MailboxKind};

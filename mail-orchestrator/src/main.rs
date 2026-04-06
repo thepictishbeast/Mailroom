@@ -7,6 +7,8 @@
 //! Designed for Postfix + Dovecot mail servers. Domain-agnostic — all
 //! configuration is in a TOML file.
 
+#![forbid(unsafe_code)]
+
 mod config;
 mod db;
 mod notifier;

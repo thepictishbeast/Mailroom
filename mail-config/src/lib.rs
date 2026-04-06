@@ -4,6 +4,8 @@
 //! Postfix, Dovecot, OpenDKIM, and Sieve configurations. Eliminates
 //! manual config file editing and ensures consistency across components.
 
+#![forbid(unsafe_code)]
+
 pub mod postfix;
 pub mod dovecot;
 pub mod dkim;
