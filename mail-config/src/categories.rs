@@ -99,21 +99,13 @@ impl AuditTag {
 }
 
 /// Sieve emission options.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct SieveEmitOptions {
     /// Emit `X-PlausiDen-Category` headers via the `editheader` extension.
     /// Requires Pigeonhole to be configured with `sieve_extensions =
     /// +editheader` (see [`crate::dovecot::generate_sieve_runtime_conf`]).
     /// Default off — the deployed VPS does not currently enable it.
     pub audit_header: bool,
-}
-
-impl Default for SieveEmitOptions {
-    fn default() -> Self {
-        Self {
-            audit_header: false,
-        }
-    }
 }
 
 /// Collection of rules, evaluated in score order (highest first).
@@ -258,7 +250,7 @@ impl<'a> MessageContext<'a> {
         self.header_values(name_lower).next().is_some()
     }
 
-    fn from_domain_with_at(&self) -> Option<String> {
+    fn extract_from_domain(&self) -> Option<String> {
         let at = self.from_address.rfind('@')?;
         Some(self.from_address[at..].to_string())
     }
@@ -274,7 +266,7 @@ fn eval_match(expr: &MatchExpr, ctx: &MessageContext) -> bool {
         }
         MatchExpr::HasHeader { header } => ctx.has_header(&header.to_lowercase()),
         MatchExpr::FromDomainIn { domains } => {
-            let Some(dom) = ctx.from_domain_with_at() else {
+            let Some(dom) = ctx.extract_from_domain() else {
                 return false;
             };
             domains.iter().any(|d| d.eq_ignore_ascii_case(&dom))

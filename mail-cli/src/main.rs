@@ -6,11 +6,20 @@
 
 #![forbid(unsafe_code)]
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
-use mail_config::{Domain, Mailbox, MailboxKind};
+use mail_config::{
+    CategoryRules, Domain, Mailbox, MailboxKind, MailboxLayout,
+    categories::SieveEmitOptions, dovecot::generate_sieve_runtime_conf,
+};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+/// Deployed paths the new emit-* subcommands write to by default.
+/// Match the live VPS layout.
+const DEFAULT_CATEGORIES_SIEVE: &str = "/etc/dovecot/sieve/categories.sieve";
+const DEFAULT_MAILBOXES_CONF: &str = "/etc/dovecot/conf.d/15-mailboxes.conf";
+const DEFAULT_SIEVE_RUNTIME_CONF: &str = "/etc/dovecot/conf.d/90-sieve.conf";
 
 #[derive(Parser)]
 #[command(name = "mail-admin", version, about = "Manage the secure email server")]
@@ -74,6 +83,88 @@ enum Commands {
         #[arg(long, default_value = "25")]
         port: u16,
     },
+
+    /// Emit the platform-wide categories Sieve script from typed
+    /// `CategoryRules` and (by default) write it to the deployed path.
+    /// Diffs against the live file before overwriting.
+    EmitCategories {
+        /// Output file. Defaults to the deployed path.
+        #[arg(long, default_value = DEFAULT_CATEGORIES_SIEVE)]
+        output: PathBuf,
+        /// Print to stdout instead of writing to disk.
+        #[arg(long)]
+        stdout: bool,
+        /// Emit the `editheader` audit-tag variant. Requires Dovecot to
+        /// have `sieve_extensions = +editheader` (use `emit-sieve-runtime
+        /// --audit-headers` to generate that config).
+        #[arg(long)]
+        audit_headers: bool,
+        /// Overwrite the live file even if it differs from the rendered
+        /// output. Without this flag, a difference produces a diff
+        /// preview and a non-zero exit so the operator can review.
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// Emit the Dovecot mailbox-layout config (`15-mailboxes.conf`) from
+    /// typed `MailboxLayout` and (by default) write it to the deployed
+    /// path. Diff/force semantics mirror `emit-categories`.
+    EmitMailboxes {
+        /// Output file.
+        #[arg(long, default_value = DEFAULT_MAILBOXES_CONF)]
+        output: PathBuf,
+        /// Print to stdout instead of writing to disk.
+        #[arg(long)]
+        stdout: bool,
+        /// Overwrite a differing live file.
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// Emit the Dovecot Sieve-runtime config (`90-sieve.conf`).
+    EmitSieveRuntime {
+        /// Output file.
+        #[arg(long, default_value = DEFAULT_SIEVE_RUNTIME_CONF)]
+        output: PathBuf,
+        /// Path the categories.sieve will live at — must match what
+        /// `emit-categories --output` wrote.
+        #[arg(long, default_value = DEFAULT_CATEGORIES_SIEVE)]
+        categories_path: PathBuf,
+        /// Print to stdout instead of writing to disk.
+        #[arg(long)]
+        stdout: bool,
+        /// Enable `sieve_extensions = +editheader` so audit-tagged
+        /// scripts work.
+        #[arg(long)]
+        audit_headers: bool,
+        /// Overwrite a differing live file.
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// Render all three deployed configs in one shot. Useful pre-deploy
+    /// gate: with no `--force`, exits non-zero if anything differs from
+    /// the live state, printing the diffs.
+    EmitAll {
+        /// Print all three to stdout instead of writing.
+        #[arg(long)]
+        stdout: bool,
+        /// Use audit headers (passes through to categories + runtime).
+        #[arg(long)]
+        audit_headers: bool,
+        /// Overwrite any differing live files.
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// Classify a single RFC822 message read from stdin against the
+    /// typed `CategoryRules`. Prints which rules would fire, in the
+    /// same order Pigeonhole would fire them.
+    ///
+    /// Demo of the round-trip: pipe `doveadm fetch -u user text uid N`
+    /// through this and you'll see exactly what the deployed Sieve
+    /// would do — same code path the Thundercrab client uses offline.
+    Classify,
 }
 
 fn main() -> Result<()> {
@@ -88,7 +179,341 @@ fn main() -> Result<()> {
         Commands::Vmailbox { domain } => cmd_vmailbox(&domain),
         Commands::Log { limit, mailbox } => cmd_log(limit, mailbox.as_deref()),
         Commands::TestSmtp { host, port } => cmd_test_smtp(&host, port),
+        Commands::EmitCategories { output, stdout, audit_headers, force } => {
+            cmd_emit_categories(&output, stdout, audit_headers, force)
+        }
+        Commands::EmitMailboxes { output, stdout, force } => {
+            cmd_emit_mailboxes(&output, stdout, force)
+        }
+        Commands::EmitSieveRuntime { output, categories_path, stdout, audit_headers, force } => {
+            cmd_emit_sieve_runtime(&output, &categories_path, stdout, audit_headers, force)
+        }
+        Commands::EmitAll { stdout, audit_headers, force } => {
+            cmd_emit_all(stdout, audit_headers, force)
+        }
+        Commands::Classify => cmd_classify(),
     }
+}
+
+// ---------------------------------------------------------------------
+// classify
+// ---------------------------------------------------------------------
+
+/// Read RFC822 from stdin, parse headers, run the typed evaluator, and
+/// print the result.
+///
+/// SECURITY: The body is read from stdin but never inspected — only
+/// headers up to the first blank line. This keeps the tool safe to use
+/// on untrusted messages.
+///
+/// BUG ASSUMPTION: Header continuation lines (RFC 5322 §2.2.3) start
+/// with SP or HTAB and are joined into the previous header. We don't
+/// implement encoded-word decoding (`=?utf-8?...?=`) — Sieve doesn't
+/// either, so matching parity is preserved.
+fn cmd_classify() -> Result<()> {
+    use mail_config::MessageContext;
+    use std::io::Read;
+
+    let mut buf = String::new();
+    std::io::stdin()
+        .read_to_string(&mut buf)
+        .context("read stdin")?;
+
+    let parsed = parse_rfc822_headers(&buf);
+    let from_addr = extract_address(parsed.from.as_deref().unwrap_or("")).to_lowercase();
+    let subject = parsed.subject.unwrap_or_default();
+
+    // Build the lowercased-key headers for MessageContext.
+    let mut hdr_pairs: Vec<(String, String)> = Vec::with_capacity(parsed.other.len());
+    for (k, v) in &parsed.other {
+        hdr_pairs.push((k.to_lowercase(), v.clone()));
+    }
+    let ctx = MessageContext {
+        headers: &hdr_pairs,
+        from_address: &from_addr,
+        subject: &subject,
+    };
+
+    let rules = CategoryRules::default();
+    let hits = rules.evaluate(&ctx);
+
+    println!("From:    {from_addr}");
+    println!("Subject: {subject}");
+    println!();
+    if hits.is_empty() {
+        println!("No category rule fired — message stays in INBOX with no flag.");
+    } else {
+        println!("Rules that would fire (in order):");
+        for r in hits {
+            println!("  - {} (score={}) → {}", r.id, r.score, action_summary(&r.action));
+            if r.stop_on_match {
+                println!("    [stop_on_match: subsequent rules skipped]");
+            }
+        }
+    }
+    Ok(())
+}
+
+#[derive(Default)]
+struct ParsedHeaders {
+    from: Option<String>,
+    subject: Option<String>,
+    /// Every other header as `(name, value)` in order. May contain
+    /// duplicate names (e.g., `Received:`).
+    other: Vec<(String, String)>,
+}
+
+/// Parse RFC822 headers up to the first blank line. Handles continuation
+/// lines (lines starting with whitespace are joined to the previous
+/// header). Returns headers split into From/Subject (most-recent wins
+/// per RFC 5322 §3.6, but in practice messages have one each) plus
+/// everything else.
+fn parse_rfc822_headers(raw: &str) -> ParsedHeaders {
+    let mut out = ParsedHeaders::default();
+    let mut current: Option<(String, String)> = None;
+
+    for line in raw.lines() {
+        if line.is_empty() {
+            // End of headers.
+            if let Some((k, v)) = current.take() {
+                stash_header(&mut out, k, v);
+            }
+            return out;
+        }
+        if line.starts_with(' ') || line.starts_with('\t') {
+            // Continuation line. Append (with single space, per
+            // unfolding rules) to the current header value.
+            if let Some((_, v)) = current.as_mut() {
+                v.push(' ');
+                v.push_str(line.trim_start());
+            }
+            continue;
+        }
+        if let Some((k, v)) = current.take() {
+            stash_header(&mut out, k, v);
+        }
+        if let Some(idx) = line.find(':') {
+            let name = line[..idx].trim().to_string();
+            let value = line[idx + 1..].trim().to_string();
+            current = Some((name, value));
+        }
+    }
+    if let Some((k, v)) = current.take() {
+        stash_header(&mut out, k, v);
+    }
+    out
+}
+
+fn stash_header(out: &mut ParsedHeaders, name: String, value: String) {
+    match name.to_ascii_lowercase().as_str() {
+        "from" if out.from.is_none() => out.from = Some(value),
+        "subject" if out.subject.is_none() => out.subject = Some(value),
+        _ => out.other.push((name, value)),
+    }
+}
+
+/// Pull the email address out of a `From:` header value. Handles both
+/// `addr@dom` and `Name <addr@dom>` forms. Falls back to the raw value.
+fn extract_address(raw: &str) -> String {
+    let s = raw.trim();
+    if let Some(start) = s.rfind('<') {
+        if let Some(end) = s[start + 1..].find('>') {
+            return s[start + 1..start + 1 + end].trim().to_string();
+        }
+    }
+    s.to_string()
+}
+
+fn action_summary(action: &mail_config::Action) -> String {
+    match action {
+        mail_config::Action::FileInto { folder } => format!("FileInto({folder})"),
+        mail_config::Action::SetFlag { flag } => format!("SetFlag({flag})"),
+        mail_config::Action::Sequence { actions } => {
+            let parts: Vec<_> = actions.iter().map(action_summary).collect();
+            format!("Sequence[{}]", parts.join(", "))
+        }
+    }
+}
+
+// ---------------------------------------------------------------------
+// emit-* helpers
+// ---------------------------------------------------------------------
+
+/// Render a piece of config and either print it, diff against live, or
+/// atomically write it. Returns `Ok(true)` if the live file changed,
+/// `Ok(false)` if it was already current.
+///
+/// SECURITY: Writes via tempfile + rename for atomicity — readers
+/// (Dovecot reading the categories.sieve at LMTP-time) never see a
+/// half-written file.
+fn render_and_write(
+    label: &str,
+    output: &Path,
+    rendered: &str,
+    stdout_only: bool,
+    force: bool,
+) -> Result<bool> {
+    if stdout_only {
+        print!("{rendered}");
+        return Ok(false);
+    }
+
+    let existing = match std::fs::read_to_string(output) {
+        Ok(s) => Some(s),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(anyhow::Error::from(e).context(format!("read {label}"))),
+    };
+
+    if existing.as_deref() == Some(rendered) {
+        println!("[{label}] OK — live file already matches typed config");
+        return Ok(false);
+    }
+
+    if let Some(prev) = &existing {
+        println!("[{label}] differs from live file:");
+        print_unified_diff(prev, rendered);
+    } else {
+        println!("[{label}] live file does not exist; would create:");
+        for line in rendered.lines().take(40) {
+            println!("    + {line}");
+        }
+    }
+
+    if !force {
+        bail!("[{label}] refusing to write without --force; review the diff above");
+    }
+
+    write_atomic(output, rendered).with_context(|| format!("write {label}"))?;
+    println!("[{label}] WROTE {} ({} bytes)", output.display(), rendered.len());
+    println!("    → run `systemctl reload dovecot` to pick up changes");
+    Ok(true)
+}
+
+/// Atomic write: render to `<output>.tmp.<pid>` then rename. Same
+/// filesystem only, so the rename is guaranteed atomic on Linux.
+fn write_atomic(output: &Path, contents: &str) -> Result<()> {
+    let parent = output
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("output path has no parent: {}", output.display()))?;
+    let tmp = parent.join(format!(
+        ".{}.tmp.{}",
+        output
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("emit"),
+        std::process::id()
+    ));
+    std::fs::write(&tmp, contents).with_context(|| format!("write tmp {}", tmp.display()))?;
+    std::fs::rename(&tmp, output).with_context(|| {
+        format!(
+            "rename {} → {}",
+            tmp.display(),
+            output.display()
+        )
+    })?;
+    Ok(())
+}
+
+/// Tiny unified-diff printer — line-by-line, no fanciness, no extra
+/// crate dep. Prefixes: ` ` context (when adjacent to changes), `-`
+/// removed, `+` added.
+fn print_unified_diff(old: &str, new: &str) {
+    let old_lines: Vec<&str> = old.lines().collect();
+    let new_lines: Vec<&str> = new.lines().collect();
+    let mut i = 0;
+    let mut j = 0;
+    while i < old_lines.len() || j < new_lines.len() {
+        if i < old_lines.len() && j < new_lines.len() && old_lines[i] == new_lines[j] {
+            i += 1;
+            j += 1;
+            continue;
+        }
+        // Find the next sync point.
+        let mut sync_old = None;
+        for (k, old_line) in old_lines.iter().enumerate().skip(i) {
+            if let Some(p) = new_lines[j..].iter().position(|x| x == old_line) {
+                sync_old = Some((k, j + p));
+                break;
+            }
+        }
+        let (next_i, next_j) = sync_old.unwrap_or((old_lines.len(), new_lines.len()));
+        for line in &old_lines[i..next_i] {
+            println!("    - {line}");
+        }
+        for line in &new_lines[j..next_j] {
+            println!("    + {line}");
+        }
+        i = next_i;
+        j = next_j;
+    }
+}
+
+fn cmd_emit_categories(
+    output: &Path,
+    stdout: bool,
+    audit_headers: bool,
+    force: bool,
+) -> Result<()> {
+    let opts = SieveEmitOptions { audit_header: audit_headers };
+    let rendered = CategoryRules::default().to_sieve_with(opts);
+    render_and_write("categories.sieve", output, &rendered, stdout, force).map(|_| ())
+}
+
+fn cmd_emit_mailboxes(output: &Path, stdout: bool, force: bool) -> Result<()> {
+    let rendered = MailboxLayout::default().to_dovecot_conf();
+    render_and_write("15-mailboxes.conf", output, &rendered, stdout, force).map(|_| ())
+}
+
+fn cmd_emit_sieve_runtime(
+    output: &Path,
+    categories_path: &Path,
+    stdout: bool,
+    audit_headers: bool,
+    force: bool,
+) -> Result<()> {
+    let cat_str = categories_path
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("categories_path is not valid UTF-8"))?;
+    let rendered = generate_sieve_runtime_conf(cat_str, audit_headers);
+    render_and_write("90-sieve.conf", output, &rendered, stdout, force).map(|_| ())
+}
+
+/// Render all three. With `--force`, writes everything and reports a
+/// summary. Without, prints diffs and returns non-zero if any file
+/// would change — useful as a pre-deploy gate (CI).
+fn cmd_emit_all(stdout: bool, audit_headers: bool, force: bool) -> Result<()> {
+    let cats_path = PathBuf::from(DEFAULT_CATEGORIES_SIEVE);
+    let mb_path = PathBuf::from(DEFAULT_MAILBOXES_CONF);
+    let runtime_path = PathBuf::from(DEFAULT_SIEVE_RUNTIME_CONF);
+
+    let cats_rendered =
+        CategoryRules::default().to_sieve_with(SieveEmitOptions { audit_header: audit_headers });
+    let mb_rendered = MailboxLayout::default().to_dovecot_conf();
+    let runtime_rendered =
+        generate_sieve_runtime_conf(cats_path.to_str().unwrap(), audit_headers);
+
+    let mut any_changed = false;
+    for (label, path, rendered) in [
+        ("categories.sieve", &cats_path, &cats_rendered),
+        ("15-mailboxes.conf", &mb_path, &mb_rendered),
+        ("90-sieve.conf", &runtime_path, &runtime_rendered),
+    ] {
+        // Run each with `force = false` first to surface diffs even
+        // when stdout-only or when not forcing — but if force is on,
+        // forward it so writes happen.
+        match render_and_write(label, path, rendered, stdout, force) {
+            Ok(changed) => any_changed |= changed,
+            Err(e) => {
+                println!("{e}");
+                any_changed = true;
+            }
+        }
+    }
+
+    if !force && any_changed && !stdout {
+        bail!("emit-all detected drift; pass --force after reviewing");
+    }
+    Ok(())
 }
 
 fn cmd_validate() -> Result<()> {
@@ -372,4 +797,54 @@ fn cmd_test_smtp(host: &str, port: u16) -> Result<()> {
     println!("\n  SMTP connection test: PASSED");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_simple_headers() {
+        let raw = "From: alice@example.com\r\nSubject: hi\r\nX-Custom: yes\r\n\r\nbody";
+        let p = parse_rfc822_headers(raw);
+        assert_eq!(p.from.as_deref(), Some("alice@example.com"));
+        assert_eq!(p.subject.as_deref(), Some("hi"));
+        assert_eq!(p.other, vec![("X-Custom".into(), "yes".into())]);
+    }
+
+    #[test]
+    fn parse_continuation_lines() {
+        let raw = "Subject: line one\r\n\tline two\r\n line three\r\n\r\n";
+        let p = parse_rfc822_headers(raw);
+        assert_eq!(p.subject.as_deref(), Some("line one line two line three"));
+    }
+
+    #[test]
+    fn parse_named_from_extracts_address() {
+        let raw = "From: \"Alice\" <alice@example.com>\r\n\r\n";
+        let p = parse_rfc822_headers(raw);
+        let addr = extract_address(p.from.as_deref().unwrap());
+        assert_eq!(addr, "alice@example.com");
+    }
+
+    #[test]
+    fn parse_duplicate_received_headers_preserved() {
+        let raw = "Received: from a\r\nReceived: from b\r\n\r\n";
+        let p = parse_rfc822_headers(raw);
+        let count = p
+            .other
+            .iter()
+            .filter(|(k, _)| k.eq_ignore_ascii_case("received"))
+            .count();
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn parse_no_blank_line_still_works() {
+        // Some IMAP fetches return only headers without a body separator.
+        let raw = "From: a@b.com\r\nSubject: x\r\n";
+        let p = parse_rfc822_headers(raw);
+        assert_eq!(p.from.as_deref(), Some("a@b.com"));
+        assert_eq!(p.subject.as_deref(), Some("x"));
+    }
 }
