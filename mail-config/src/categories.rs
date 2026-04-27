@@ -128,6 +128,7 @@ impl Default for CategoryRules {
                 rule_forums_googlegroups(),
                 rule_updates_senders(),
                 rule_updates_subject_keywords(),
+                rule_updates_noreply_sender(),
             ],
         }
     }
@@ -398,7 +399,7 @@ fn rule_internal_source() -> CategoryRule {
 fn rule_important() -> CategoryRule {
     CategoryRule {
         id: "important_priority".into(),
-        display_name: "Important (X-Priority 1/2)".into(),
+        display_name: "Important (X-Priority high / Importance high / Outlook attach hint)".into(),
         when: MatchExpr::Any {
             exprs: vec![
                 MatchExpr::HeaderContains {
@@ -408,6 +409,14 @@ fn rule_important() -> CategoryRule {
                 MatchExpr::HeaderContains {
                     header: "X-Priority".into(),
                     substring: "2".into(),
+                },
+                MatchExpr::HeaderContains {
+                    header: "Importance".into(),
+                    substring: "High".into(),
+                },
+                MatchExpr::HeaderContains {
+                    header: "X-MS-Has-Attach".into(),
+                    substring: "yes".into(),
                 },
             ],
         },
@@ -424,10 +433,38 @@ fn rule_important() -> CategoryRule {
 
 fn rule_promotions_listunsub() -> CategoryRule {
     CategoryRule {
+        // ID kept stable for federated-ledger continuity; the rule body
+        // now matches multiple bulk-marketing markers, not just
+        // List-Unsubscribe.
         id: "promotions_listunsub".into(),
-        display_name: "Promotions — List-Unsubscribe present".into(),
-        when: MatchExpr::HasHeader {
-            header: "List-Unsubscribe".into(),
+        display_name: "Promotions — bulk-mail markers (List-Unsubscribe / X-Mailer / X-Campaign / Precedence)".into(),
+        when: MatchExpr::Any {
+            exprs: vec![
+                MatchExpr::HasHeader {
+                    header: "List-Unsubscribe".into(),
+                },
+                MatchExpr::HasHeader {
+                    header: "X-Mailer".into(),
+                },
+                MatchExpr::HasHeader {
+                    header: "X-Campaign".into(),
+                },
+                MatchExpr::HasHeader {
+                    header: "X-Mailgun-Tag".into(),
+                },
+                MatchExpr::HeaderContains {
+                    header: "Precedence".into(),
+                    substring: "bulk".into(),
+                },
+                MatchExpr::HeaderContains {
+                    header: "Precedence".into(),
+                    substring: "junk".into(),
+                },
+                MatchExpr::HeaderContains {
+                    header: "Precedence".into(),
+                    substring: "list".into(),
+                },
+            ],
         },
         action: Action::FileInto {
             folder: "Promotions".into(),
@@ -448,6 +485,10 @@ fn rule_promotions_senders() -> CategoryRule {
                 "@mailgun.org".into(),
                 "@constantcontact.com".into(),
                 "@hubspot.com".into(),
+                "@sparkpostmail.com".into(),
+                "@amazonses.com".into(),
+                "@klaviyomail.com".into(),
+                "@rsgsv.net".into(),
             ],
         },
         action: Action::FileInto {
@@ -466,13 +507,19 @@ fn rule_social_senders() -> CategoryRule {
             domains: vec![
                 "@facebook.com".into(),
                 "@facebookmail.com".into(),
+                "@messenger.com".into(),
                 "@twitter.com".into(),
                 "@x.com".into(),
                 "@linkedin.com".into(),
+                "@linkedinmail.com".into(),
                 "@discord.com".into(),
                 "@discordapp.com".into(),
+                "@slack.com".into(),
                 "@instagram.com".into(),
+                "@tiktok.com".into(),
+                "@youtube.com".into(),
                 "@reddit.com".into(),
+                "@redditmail.com".into(),
             ],
         },
         action: Action::FileInto {
@@ -486,9 +533,19 @@ fn rule_social_senders() -> CategoryRule {
 fn rule_forums_listid() -> CategoryRule {
     CategoryRule {
         id: "forums_listid".into(),
-        display_name: "Forums — List-Id present".into(),
-        when: MatchExpr::HasHeader {
-            header: "List-Id".into(),
+        display_name: "Forums — mailing-list headers (List-Id / Mailing-List / List-Post)".into(),
+        when: MatchExpr::Any {
+            exprs: vec![
+                MatchExpr::HasHeader {
+                    header: "List-Id".into(),
+                },
+                MatchExpr::HasHeader {
+                    header: "Mailing-List".into(),
+                },
+                MatchExpr::HasHeader {
+                    header: "List-Post".into(),
+                },
+            ],
         },
         action: Action::FileInto {
             folder: "Forums".into(),
@@ -501,9 +558,13 @@ fn rule_forums_listid() -> CategoryRule {
 fn rule_forums_googlegroups() -> CategoryRule {
     CategoryRule {
         id: "forums_googlegroups".into(),
-        display_name: "Forums — Google Groups".into(),
+        display_name: "Forums — list-server domains (Google Groups, groups.io, Yahoo Groups)".into(),
         when: MatchExpr::FromDomainIn {
-            domains: vec!["@googlegroups.com".into()],
+            domains: vec![
+                "@googlegroups.com".into(),
+                "@groups.io".into(),
+                "@yahoogroups.com".into(),
+            ],
         },
         action: Action::FileInto {
             folder: "Forums".into(),
@@ -519,13 +580,18 @@ fn rule_updates_senders() -> CategoryRule {
         display_name: "Updates — service providers".into(),
         when: MatchExpr::FromDomainIn {
             domains: vec![
+                // Developer infrastructure + code hosting.
                 "@github.com".into(),
+                "@noreply.github.com".into(),
                 "@gitlab.com".into(),
-                "@stripe.com".into(),
-                "@paypal.com".into(),
+                "@bitbucket.org".into(),
+                // Cloud / SaaS infrastructure.
                 "@amazon.com".into(),
                 "@amazonaws.com".into(),
                 "@apple.com".into(),
+                "@icloud.com".into(),
+                "@google.com".into(),
+                "@microsoft.com".into(),
                 "@dropbox.com".into(),
                 "@cloudflare.com".into(),
                 "@vercel.com".into(),
@@ -535,6 +601,25 @@ fn rule_updates_senders() -> CategoryRule {
                 "@pypi.org".into(),
                 "@vultr.com".into(),
                 "@digitalocean.com".into(),
+                "@letsencrypt.org".into(),
+                // Domain registrars.
+                "@namesilo.com".into(),
+                "@godaddy.com".into(),
+                "@networksolutions.com".into(),
+                // Payment / commerce.
+                "@stripe.com".into(),
+                "@paypal.com".into(),
+                "@venmo.com".into(),
+                "@zelle.com".into(),
+                "@intuit.com".into(),
+                "@shopify.com".into(),
+                // Banking — transactional alerts.
+                "@chase.com".into(),
+                "@bankofamerica.com".into(),
+                // On-demand services with order/receipt confirmations.
+                "@doordash.com".into(),
+                "@uber.com".into(),
+                "@lyft.com".into(),
             ],
         },
         action: Action::FileInto {
@@ -556,13 +641,21 @@ fn rule_updates_senders() -> CategoryRule {
 fn rule_updates_subject_keywords() -> CategoryRule {
     CategoryRule {
         id: "updates_subject_keywords".into(),
-        display_name: "Updates — receipt/invoice/OTP keywords".into(),
+        display_name: "Updates — transactional subject keywords".into(),
         when: MatchExpr::SubjectContainsAny {
             needles: vec![
                 "receipt".into(),
                 "invoice".into(),
                 "your order".into(),
+                "shipping".into(),
+                "delivery".into(),
+                "confirmation".into(),
+                "verify".into(),
+                "verification".into(),
                 "verification code".into(),
+                "password reset".into(),
+                "two-factor".into(),
+                "2FA".into(),
                 "one-time".into(),
                 "otp".into(),
             ],
@@ -571,6 +664,46 @@ fn rule_updates_subject_keywords() -> CategoryRule {
             folder: "Updates".into(),
         },
         score: 50,
+        stop_on_match: true,
+    }
+}
+
+/// Catch transactional / no-reply senders by From-header substring.
+/// Lower priority than the explicit domain list so a known service
+/// provider still wins, but high enough to file generic
+/// `noreply@example.org` mail into Updates rather than letting it
+/// fall through to (none).
+fn rule_updates_noreply_sender() -> CategoryRule {
+    CategoryRule {
+        id: "updates_noreply_sender".into(),
+        display_name: "Updates — From contains noreply / no-reply / donotreply".into(),
+        when: MatchExpr::Any {
+            exprs: vec![
+                MatchExpr::HeaderContains {
+                    header: "From".into(),
+                    substring: "noreply".into(),
+                },
+                MatchExpr::HeaderContains {
+                    header: "From".into(),
+                    substring: "no-reply".into(),
+                },
+                MatchExpr::HeaderContains {
+                    header: "From".into(),
+                    substring: "donotreply".into(),
+                },
+                MatchExpr::HeaderContains {
+                    header: "From".into(),
+                    substring: "do-not-reply".into(),
+                },
+            ],
+        },
+        action: Action::FileInto {
+            folder: "Updates".into(),
+        },
+        // Score 45 — sits below subject_keywords (50) so an order
+        // confirmation from `noreply@…` still routes via the more
+        // semantic keyword rule. Both end in Updates anyway.
+        score: 45,
         stop_on_match: true,
     }
 }
