@@ -119,6 +119,7 @@ impl Default for CategoryRules {
     fn default() -> Self {
         Self {
             rules: vec![
+                rule_internal_source(),
                 rule_important(),
                 rule_promotions_listunsub(),
                 rule_promotions_senders(),
@@ -361,6 +362,39 @@ fn sieve_escape(s: &str) -> String {
 
 // --- default rules ---------------------------------------------------
 
+fn rule_internal_source() -> CategoryRule {
+    CategoryRule {
+        id: "internal_source".into(),
+        display_name: "Internal infrastructure → INBOX".into(),
+        when: MatchExpr::FromDomainIn {
+            domains: vec![
+                // PlausiDen-owned mail (replies, alerts, automated reports).
+                "@plausiden.com".into(),
+                "@plausiden.internal".into(),
+                // Vultr default hostnames — laptops + sub-VPS instances
+                // sending operational alerts before they're given a real
+                // sender identity. Everything from these origins is
+                // assumed direct-to-user, not list mail.
+                "@vultr.guest".into(),
+                "@web-01.plausiden.internal".into(),
+            ],
+        },
+        // INBOX is the implicit default if no rule fires; explicitly
+        // filing here lets `stop_on_match` short-circuit lower-priority
+        // rules (especially List-Unsubscribe) that would otherwise
+        // misroute these direct messages.
+        action: Action::FileInto {
+            folder: "INBOX".into(),
+        },
+        // Score 100 — beats `important_priority` (90) so any direct
+        // message from internal infrastructure sits in INBOX without
+        // being flagged. Adding a flag is the user's choice via the
+        // mail client.
+        score: 100,
+        stop_on_match: true,
+    }
+}
+
 fn rule_important() -> CategoryRule {
     CategoryRule {
         id: "important_priority".into(),
@@ -493,12 +527,28 @@ fn rule_updates_senders() -> CategoryRule {
                 "@amazonaws.com".into(),
                 "@apple.com".into(),
                 "@dropbox.com".into(),
+                "@cloudflare.com".into(),
+                "@vercel.com".into(),
+                "@netlify.com".into(),
+                "@docker.com".into(),
+                "@npmjs.com".into(),
+                "@pypi.org".into(),
+                "@vultr.com".into(),
+                "@digitalocean.com".into(),
             ],
         },
         action: Action::FileInto {
             folder: "Updates".into(),
         },
-        score: 60,
+        // Score 85 beats `promotions_listunsub` (80) so transactional /
+        // operational notifications from known service providers go to
+        // Updates even when they include a List-Unsubscribe header
+        // (which most modern senders do for compliance).
+        // BUG ASSUMPTION: This rule fires before list-unsubscribe routing.
+        // Re-rank with care — moving service-provider mail into Promotions
+        // is a worse default than the noise of an unrelated newsletter
+        // landing in Updates.
+        score: 85,
         stop_on_match: true,
     }
 }
@@ -549,6 +599,75 @@ mod tests {
         assert!(!hits.is_empty(), "no rule fired");
         let names: Vec<_> = hits.iter().map(|r| r.id.as_str()).collect();
         assert!(names.contains(&"updates_senders"), "got {names:?}");
+    }
+
+    /// REGRESSION-GUARD: GitHub notifications include a List-Unsubscribe
+    /// header for compliance, but they're operational alerts (CI failures,
+    /// PR reviews, security advisories) that belong in Updates, not
+    /// Promotions. Service-provider domains must win against the generic
+    /// List-Unsubscribe rule.
+    #[test]
+    fn github_with_list_unsubscribe_still_routes_to_updates() {
+        let rules = CategoryRules::default();
+        let h = vec![("list-unsubscribe".into(), "<mailto:unsub@github.com>".into())];
+        let hits = rules.evaluate(&ctx(&h, "notifications@github.com", "[repo] Run failed: ci"));
+        let first = hits.first().expect("a rule fires");
+        assert_eq!(
+            first.id, "updates_senders",
+            "GitHub mail with List-Unsubscribe must still go to Updates, got {}",
+            first.id
+        );
+    }
+
+    /// Stripe receipts are the same shape — transactional, with
+    /// List-Unsubscribe — and must stay in Updates.
+    #[test]
+    fn stripe_receipt_with_list_unsubscribe_routes_to_updates() {
+        let rules = CategoryRules::default();
+        let h = vec![("list-unsubscribe".into(), "<mailto:unsub@stripe.com>".into())];
+        let hits = rules.evaluate(&ctx(&h, "receipts@stripe.com", "Your receipt from Stripe"));
+        assert_eq!(hits.first().unwrap().id, "updates_senders");
+    }
+
+    /// Internal-infrastructure messages — PlausiDen Salesman, daily
+    /// summary daemons, oncall alerts from the same fleet — must land
+    /// in INBOX, never in a category folder. Even with a
+    /// List-Unsubscribe header (which most SMTP libraries auto-add).
+    #[test]
+    fn internal_vultr_guest_sender_lands_in_inbox() {
+        let rules = CategoryRules::default();
+        let h = vec![("list-unsubscribe".into(), "<mailto:x@vultr.guest>".into())];
+        let hits = rules.evaluate(&ctx(&h, "salesman@vultr.guest", "daily summary"));
+        let first = hits.first().expect("a rule fires");
+        assert_eq!(first.id, "internal_source");
+        assert_eq!(
+            first.action,
+            Action::FileInto {
+                folder: "INBOX".into()
+            }
+        );
+    }
+
+    #[test]
+    fn internal_plausiden_com_sender_lands_in_inbox() {
+        let rules = CategoryRules::default();
+        let h = vec![];
+        let hits = rules.evaluate(&ctx(&h, "alerts@plausiden.com", "Disk usage 87%"));
+        assert_eq!(hits.first().unwrap().id, "internal_source");
+    }
+
+    /// Internal-source rule beats important_priority — direct internal
+    /// messages don't need the X-Priority flag treatment.
+    #[test]
+    fn internal_beats_x_priority_flag() {
+        let rules = CategoryRules::default();
+        let h = vec![("x-priority".into(), "1".into())];
+        let hits = rules.evaluate(&ctx(&h, "salesman@vultr.guest", "URGENT: lead"));
+        assert_eq!(
+            hits.first().unwrap().id,
+            "internal_source",
+            "internal_source (100) must outscore important_priority (90)"
+        );
     }
 
     #[test]
@@ -628,10 +747,14 @@ mod tests {
     fn sieve_output_orders_by_score_desc() {
         let s = CategoryRules::default().to_sieve();
         let imp_pos = s.find("important_priority").expect("important present");
-        let promo_pos = s.find("promotions_listunsub").expect("promo present");
         let updates_pos = s.find("updates_senders").expect("updates present");
-        assert!(imp_pos < promo_pos, "score 90 should precede score 80");
-        assert!(promo_pos < updates_pos, "score 80 should precede score 60");
+        let promo_pos = s.find("promotions_listunsub").expect("promo present");
+        let promo_senders_pos = s.find("promotions_senders").expect("promo senders present");
+        // important (90) → updates_senders (85) → promotions_listunsub (80)
+        // → forums_listid (75) → promotions_senders (70).
+        assert!(imp_pos < updates_pos, "score 90 should precede score 85");
+        assert!(updates_pos < promo_pos, "score 85 should precede score 80");
+        assert!(promo_pos < promo_senders_pos, "score 80 should precede score 70");
     }
 
     #[test]
