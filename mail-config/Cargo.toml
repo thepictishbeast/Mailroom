@@ -15,3 +15,8 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
+# Property-based tests against the rule evaluator. The fuzz surface
+# is finite (rule shapes + header bags) so bounded inputs keep run
+# time deterministic; we only need a few hundred iterations to cover
+# the interesting state space.
+proptest = "1"
