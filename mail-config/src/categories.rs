@@ -367,17 +367,36 @@ fn rule_internal_source() -> CategoryRule {
     CategoryRule {
         id: "internal_source".into(),
         display_name: "Internal infrastructure → INBOX".into(),
-        when: MatchExpr::FromDomainIn {
-            domains: vec![
-                // PlausiDen-owned mail (replies, alerts, automated reports).
-                "@plausiden.com".into(),
-                "@plausiden.internal".into(),
-                // Vultr default hostnames — laptops + sub-VPS instances
-                // sending operational alerts before they're given a real
-                // sender identity. Everything from these origins is
-                // assumed direct-to-user, not list mail.
-                "@vultr.guest".into(),
-                "@web-01.plausiden.internal".into(),
+        when: MatchExpr::Any {
+            exprs: vec![
+                MatchExpr::FromDomainIn {
+                    domains: vec![
+                        // PlausiDen-owned mail (replies, alerts, reports).
+                        "@plausiden.com".into(),
+                        "@plausiden.internal".into(),
+                        // Vultr default hostnames — varies per instance
+                        // image (vultr.guest, vultr.vultr, vultr.local
+                        // are all observed in the wild). Sub-VPS
+                        // operational alerts go through these before
+                        // they're given a real sender identity.
+                        "@vultr.guest".into(),
+                        "@vultr.vultr".into(),
+                        "@vultr.local".into(),
+                        "@web-01.plausiden.internal".into(),
+                    ],
+                },
+                // Belt-and-braces: any From containing ".vultr." catches
+                // future hostname variants we haven't seen yet (Vultr
+                // sometimes spawns instances with hostnames like
+                // `web-02.plausiden.vultr.guest` or similar).
+                MatchExpr::HeaderContains {
+                    header: "From".into(),
+                    substring: ".vultr.".into(),
+                },
+                MatchExpr::HeaderContains {
+                    header: "From".into(),
+                    substring: "@vultr".into(),
+                },
             ],
         },
         // INBOX is the implicit default if no rule fires; explicitly
@@ -786,6 +805,26 @@ mod tests {
         let rules = CategoryRules::default();
         let h = vec![];
         let hits = rules.evaluate(&ctx(&h, "alerts@plausiden.com", "Disk usage 87%"));
+        assert_eq!(hits.first().unwrap().id, "internal_source");
+    }
+
+    /// Vultr default hostnames vary per image (.guest, .vultr, .local).
+    /// All of them must hit internal_source.
+    #[test]
+    fn internal_vultr_vultr_hostname_lands_in_inbox() {
+        let rules = CategoryRules::default();
+        let h = vec![("from".into(), "claude-code@vultr.vultr".into())];
+        let hits = rules.evaluate(&ctx(&h, "claude-code@vultr.vultr", "task ack"));
+        assert_eq!(hits.first().unwrap().id, "internal_source");
+    }
+
+    /// Future Vultr hostname variants (e.g. web-02.plausiden.vultr.guest)
+    /// are caught by the From-substring fallback.
+    #[test]
+    fn internal_unknown_vultr_subdomain_caught_by_substring() {
+        let rules = CategoryRules::default();
+        let h = vec![("from".into(), "robot@web-02.plausiden.vultr.guest".into())];
+        let hits = rules.evaluate(&ctx(&h, "robot@web-02.plausiden.vultr.guest", "test"));
         assert_eq!(hits.first().unwrap().id, "internal_source");
     }
 
