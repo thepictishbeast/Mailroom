@@ -120,6 +120,7 @@ impl Default for CategoryRules {
         Self {
             rules: vec![
                 rule_internal_source(),
+                rule_2fa_inbox(),
                 rule_important(),
                 rule_promotions_listunsub(),
                 rule_promotions_senders(),
@@ -411,6 +412,59 @@ fn rule_internal_source() -> CategoryRule {
         // being flagged. Adding a flag is the user's choice via the
         // mail client.
         score: 100,
+        stop_on_match: true,
+    }
+}
+
+fn rule_2fa_inbox() -> CategoryRule {
+    CategoryRule {
+        id: "2fa_inbox".into(),
+        display_name: "Auth codes (2FA / verification / sign-in) → INBOX + flagged".into(),
+        when: MatchExpr::Any {
+            exprs: vec![
+                MatchExpr::SubjectContainsAny {
+                    needles: vec![
+                        "2FA".into(),
+                        "verification code".into(),
+                        "verify your email".into(),
+                        "sign-in code".into(),
+                        "sign in code".into(),
+                        "security code".into(),
+                        "one-time code".into(),
+                        "auth code".into(),
+                        "login code".into(),
+                        "passcode".into(),
+                        "your code is".into(),
+                        " code is ".into(),
+                        "OTP".into(),
+                    ],
+                },
+                MatchExpr::HeaderContains {
+                    header: "Subject".into(),
+                    substring: "is your code".into(),
+                },
+            ],
+        },
+        // Two-step action: flag for visibility in the IMAP client, then
+        // file to INBOX explicitly so `stop_on_match` can short-circuit
+        // the lower-priority Updates / List-Unsubscribe rules. Without
+        // this, "Sacred Vote Admin 2FA Code" matches
+        // updates_subject_keywords and gets buried in Updates.
+        action: Action::Sequence {
+            actions: vec![
+                Action::SetFlag {
+                    flag: "\\Flagged".into(),
+                },
+                Action::FileInto {
+                    folder: "INBOX".into(),
+                },
+            ],
+        },
+        // Score 95 — runs after internal_source (100) and before
+        // important_priority (90). Authentication codes are time-sensitive,
+        // so we want them at the top of INBOX regardless of bulk-mail
+        // markers.
+        score: 95,
         stop_on_match: true,
     }
 }
