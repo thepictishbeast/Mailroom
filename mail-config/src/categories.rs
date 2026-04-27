@@ -524,17 +524,25 @@ fn rule_social_senders() -> CategoryRule {
         display_name: "Social — major platforms".into(),
         when: MatchExpr::FromDomainIn {
             domains: vec![
+                // Facebook family.
                 "@facebook.com".into(),
                 "@facebookmail.com".into(),
+                "@mail.facebook.com".into(),
                 "@messenger.com".into(),
+                "@instagram.com".into(),
+                "@mail.instagram.com".into(),
+                // Twitter / X.
                 "@twitter.com".into(),
                 "@x.com".into(),
+                // LinkedIn.
                 "@linkedin.com".into(),
                 "@linkedinmail.com".into(),
+                // Discord.
                 "@discord.com".into(),
                 "@discordapp.com".into(),
+                // Slack.
                 "@slack.com".into(),
-                "@instagram.com".into(),
+                // Other social platforms.
                 "@tiktok.com".into(),
                 "@youtube.com".into(),
                 "@reddit.com".into(),
@@ -544,7 +552,11 @@ fn rule_social_senders() -> CategoryRule {
         action: Action::FileInto {
             folder: "Social".into(),
         },
-        score: 70,
+        // Score 85 — same trick as `updates_senders`: known social
+        // platforms always include a List-Unsubscribe header, so we
+        // need to beat `promotions_listunsub` (80) to keep "Tanya
+        // tagged you on Instagram" mail in Social, not Promotions.
+        score: 85,
         stop_on_match: true,
     }
 }
@@ -779,6 +791,24 @@ mod tests {
         let h = vec![("list-unsubscribe".into(), "<mailto:unsub@stripe.com>".into())];
         let hits = rules.evaluate(&ctx(&h, "receipts@stripe.com", "Your receipt from Stripe"));
         assert_eq!(hits.first().unwrap().id, "updates_senders");
+    }
+
+    /// Facebook + Instagram notifications carry List-Unsubscribe but
+    /// belong in Social, not Promotions.
+    #[test]
+    fn facebook_notification_with_list_unsubscribe_routes_to_social() {
+        let rules = CategoryRules::default();
+        let h = vec![("list-unsubscribe".into(), "<mailto:u@facebookmail.com>".into())];
+        let hits = rules.evaluate(&ctx(&h, "friendsuggestion@facebookmail.com", "Friend suggestions"));
+        assert_eq!(hits.first().unwrap().id, "social_senders");
+    }
+
+    #[test]
+    fn instagram_subdomain_with_list_unsubscribe_routes_to_social() {
+        let rules = CategoryRules::default();
+        let h = vec![("list-unsubscribe".into(), "<mailto:u@mail.instagram.com>".into())];
+        let hits = rules.evaluate(&ctx(&h, "follow@mail.instagram.com", "New followers"));
+        assert_eq!(hits.first().unwrap().id, "social_senders");
     }
 
     /// Internal-infrastructure messages — PlausiDen Salesman, daily
