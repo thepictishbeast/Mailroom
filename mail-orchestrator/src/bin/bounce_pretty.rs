@@ -72,13 +72,13 @@ fn rewrite_bounce(raw: &[u8]) -> Option<Vec<u8>> {
 
         if part_ct.contains("message/delivery-status") {
             delivery_status_block = Some(body.to_vec());
-            for line in String::from_utf8_lossy(body).lines() {
-                if let Some(v) = strip_prefix_ci(line, "Diagnostic-Code:") {
-                    diagnostic = Some(v.trim().to_string());
-                } else if let Some(v) = strip_prefix_ci(line, "Status:") {
-                    status = Some(v.trim().to_string());
-                } else if let Some(v) = strip_prefix_ci(line, "Final-Recipient:") {
-                    if let Some(addr) = v.split(';').nth(1) {
+            for (name, value) in unfold_header_lines(body) {
+                if name.eq_ignore_ascii_case("Diagnostic-Code") {
+                    diagnostic = Some(value);
+                } else if name.eq_ignore_ascii_case("Status") {
+                    status = Some(value);
+                } else if name.eq_ignore_ascii_case("Final-Recipient") {
+                    if let Some(addr) = value.split(';').nth(1) {
                         failed_recipient = Some(addr.trim().to_string());
                     }
                 }
@@ -87,14 +87,11 @@ fn rewrite_bounce(raw: &[u8]) -> Option<Vec<u8>> {
             if part_ct.contains("message/rfc822") {
                 rfc822_block = Some(body.to_vec());
             }
-            for line in String::from_utf8_lossy(body).lines().take(80) {
-                if line.is_empty() {
-                    break;
-                }
-                if let Some(v) = strip_prefix_ci(line, "Subject:") {
-                    original_subject = Some(v.trim().to_string());
-                } else if let Some(v) = strip_prefix_ci(line, "From:") {
-                    original_from = Some(v.trim().to_string());
+            for (name, value) in unfold_header_lines(body) {
+                if name.eq_ignore_ascii_case("Subject") {
+                    original_subject = Some(value);
+                } else if name.eq_ignore_ascii_case("From") {
+                    original_from = Some(value);
                 }
             }
         }
@@ -187,6 +184,58 @@ fn strip_prefix_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
     } else {
         None
     }
+}
+
+/// RFC 5322 §2.2.3 header unfolding, plus RFC 3464-friendly
+/// "blank lines separate blocks but don't end the header set"
+/// behavior. Iterates a bytes block as (header-name, header-value)
+/// pairs.
+///
+/// Continuation lines (those starting with whitespace) join to the
+/// preceding header, separated by a single space.
+///
+/// Blank lines do NOT terminate parsing here — RFC 3464
+/// `message/delivery-status` content is structured as multiple
+/// header-like blocks (per-message + per-recipient), separated by
+/// blank lines but with all of them being properties we want.
+/// Callers that need a stop-at-blank semantic should slice the
+/// input first.
+///
+/// `max_lines` caps work to keep pathological input from running
+/// away; pass a generous value (>=200) for normal use.
+fn unfold_header_lines(body: &[u8]) -> Vec<(String, String)> {
+    let s = String::from_utf8_lossy(body);
+    let mut out: Vec<(String, String)> = Vec::new();
+    let mut current: Option<(String, String)> = None;
+    for line in s.lines().take(200) {
+        if line.is_empty() {
+            // Block separator — flush current; keep iterating.
+            if let Some(prev) = current.take() {
+                out.push(prev);
+            }
+            continue;
+        }
+        if line.starts_with(' ') || line.starts_with('\t') {
+            // Continuation — append (with single space) to previous.
+            if let Some((_, v)) = current.as_mut() {
+                v.push(' ');
+                v.push_str(line.trim_start());
+            }
+            continue;
+        }
+        if let Some(prev) = current.take() {
+            out.push(prev);
+        }
+        if let Some(colon) = line.find(':') {
+            let name = line[..colon].trim().to_string();
+            let value = line[colon + 1..].trim().to_string();
+            current = Some((name, value));
+        }
+    }
+    if let Some(prev) = current {
+        out.push(prev);
+    }
+    out
 }
 
 /// Emit a new multipart message that wraps the original bounce body
@@ -395,5 +444,43 @@ the body of the original\r
         assert_eq!(strip_prefix_ci("Status: 5.1.1", "status:"), Some(" 5.1.1"));
         assert_eq!(strip_prefix_ci("STATUS: x", "Status:"), Some(" x"));
         assert_eq!(strip_prefix_ci("nope", "Status:"), None);
+    }
+
+    #[test]
+    fn unfold_joins_continuation_lines() {
+        let raw = b"Diagnostic-Code: smtp; 550 5.1.1 <nobody@x> User\r\n  doesn't exist: nobody@x\r\nStatus: 5.1.1\r\n\r\nbody\r\n";
+        let pairs = unfold_header_lines(raw);
+        let diag = pairs
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("Diagnostic-Code"))
+            .map(|(_, v)| v.clone())
+            .unwrap();
+        assert!(
+            diag.contains("User doesn't exist: nobody@x"),
+            "unfold should join multi-line diagnostic: {diag:?}"
+        );
+        let status = pairs
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("Status"))
+            .map(|(_, v)| v.clone())
+            .unwrap();
+        assert_eq!(status, "5.1.1");
+    }
+
+    #[test]
+    fn rewrites_multi_line_diagnostic() {
+        // Same as SAMPLE_BOUNCE but with Diagnostic-Code spanning two lines.
+        let raw = SAMPLE_BOUNCE.replace(
+            "Diagnostic-Code: smtp; 550 5.1.1 user unknown",
+            "Diagnostic-Code: smtp; 550 5.1.1 user\r\n  unknown — try a different address",
+        );
+        let result = rewrite_bounce(raw.as_bytes());
+        assert!(result.is_some());
+        let out = String::from_utf8(result.unwrap()).unwrap();
+        // Both lines of the diagnostic survive into the rendered body.
+        assert!(
+            out.contains("user unknown — try a different address"),
+            "multi-line diagnostic was truncated"
+        );
     }
 }
