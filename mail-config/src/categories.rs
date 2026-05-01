@@ -121,11 +121,17 @@ impl Default for CategoryRules {
             rules: vec![
                 rule_internal_source(),
                 rule_2fa_inbox(),
+                rule_important_security(),
+                rule_important_signature(),
+                rule_important_billing_critical(),
                 rule_important(),
                 rule_promotions_listunsub(),
                 rule_promotions_senders(),
                 rule_social_senders(),
                 rule_forums_listid(),
+                rule_forums_listid_substring(),
+                rule_forums_discourse_subdomain(),
+                rule_forums_dev_communities(),
                 rule_forums_googlegroups(),
                 rule_updates_senders(),
                 rule_updates_subject_keywords(),
@@ -469,6 +475,153 @@ fn rule_2fa_inbox() -> CategoryRule {
     }
 }
 
+/// Security alerts → Important. New-device sign-ins, password changes,
+/// suspicious activity warnings, account-lockout notices. Score 92 sits
+/// above `important_priority` (90) so we file *into* Important rather
+/// than just flagging.
+///
+/// BUG ASSUMPTION: marketing mail occasionally borrows this language
+/// ("Did you mean to sign in?"). Subject keywords are paired with
+/// generic auth language so a campaign won't trip a single keyword.
+fn rule_important_security() -> CategoryRule {
+    CategoryRule {
+        id: "important_security".into(),
+        display_name: "Important — security alerts (sign-in, password, suspicious activity)".into(),
+        when: MatchExpr::SubjectContainsAny {
+            needles: vec![
+                "new sign-in".into(),
+                "new sign in".into(),
+                "new device".into(),
+                "new login".into(),
+                "suspicious sign-in".into(),
+                "suspicious activity".into(),
+                "unusual sign-in".into(),
+                "unusual activity".into(),
+                "we noticed".into(),
+                "security alert".into(),
+                "password was changed".into(),
+                "password changed".into(),
+                "password reset".into(),
+                "account locked".into(),
+                "account suspended".into(),
+                "compromised".into(),
+                "data breach".into(),
+                "have i been pwned".into(),
+                "haveibeenpwned".into(),
+            ],
+        },
+        action: Action::Sequence {
+            actions: vec![
+                Action::SetFlag {
+                    flag: "\\Flagged".into(),
+                },
+                Action::FileInto {
+                    folder: "Important".into(),
+                },
+            ],
+        },
+        score: 92,
+        stop_on_match: true,
+    }
+}
+
+/// Document-signature requests → Important. DocuSign / HelloSign /
+/// Adobe Sign / Dropbox Sign envelopes plus generic "please sign"
+/// patterns. These are time-sensitive and shouldn't be buried in
+/// Updates next to receipts.
+fn rule_important_signature() -> CategoryRule {
+    CategoryRule {
+        id: "important_signature".into(),
+        display_name: "Important — signature requests (DocuSign / HelloSign / Adobe Sign)".into(),
+        when: MatchExpr::Any {
+            exprs: vec![
+                MatchExpr::FromDomainIn {
+                    domains: vec![
+                        "@docusign.com".into(),
+                        "@docusign.net".into(),
+                        "@hellosign.com".into(),
+                        "@dropboxsign.com".into(),
+                        "@adobesign.com".into(),
+                        "@echosign.com".into(),
+                        "@pandadoc.com".into(),
+                        "@signnow.com".into(),
+                    ],
+                },
+                MatchExpr::SubjectContainsAny {
+                    needles: vec![
+                        "please sign".into(),
+                        "signature requested".into(),
+                        "request for signature".into(),
+                        "complete with docusign".into(),
+                        "ready to sign".into(),
+                        "agreement to sign".into(),
+                        "contract to sign".into(),
+                        "nda".into(),
+                    ],
+                },
+            ],
+        },
+        action: Action::Sequence {
+            actions: vec![
+                Action::SetFlag {
+                    flag: "\\Flagged".into(),
+                },
+                Action::FileInto {
+                    folder: "Important".into(),
+                },
+            ],
+        },
+        score: 91,
+        stop_on_match: true,
+    }
+}
+
+/// Billing-critical → Important. Failed payments, expiring domains,
+/// final notices. Sits above generic transactional Updates so a
+/// "Your domain expires in 7 days" doesn't get lost next to delivery
+/// confirmations.
+///
+/// BUG ASSUMPTION: pure receipts ("invoice for $X") still land in
+/// Updates — only failure / expiry / final-notice language hits here.
+fn rule_important_billing_critical() -> CategoryRule {
+    CategoryRule {
+        id: "important_billing_critical".into(),
+        display_name: "Important — billing failure / expiry / final notice".into(),
+        when: MatchExpr::SubjectContainsAny {
+            needles: vec![
+                "payment failed".into(),
+                "card declined".into(),
+                "payment declined".into(),
+                "could not charge".into(),
+                "unable to process".into(),
+                "subscription canceled".into(),
+                "subscription cancelled".into(),
+                "subscription expir".into(),
+                "domain expir".into(),
+                "renewal failed".into(),
+                "final notice".into(),
+                "past due".into(),
+                "overdue".into(),
+                "action required".into(),
+                "trial ending".into(),
+                "trial expir".into(),
+            ],
+        },
+        action: Action::Sequence {
+            actions: vec![
+                Action::SetFlag {
+                    flag: "\\Flagged".into(),
+                },
+                Action::FileInto {
+                    folder: "Important".into(),
+                },
+            ],
+        },
+        score: 89,
+        stop_on_match: true,
+    }
+}
+
 fn rule_important() -> CategoryRule {
     CategoryRule {
         id: "important_priority".into(),
@@ -636,6 +789,126 @@ fn rule_forums_listid() -> CategoryRule {
             folder: "Forums".into(),
         },
         score: 75,
+        stop_on_match: true,
+    }
+}
+
+/// Forums — list-server identity hints in List-Id (when present).
+/// `forums_listid` only requires the header to exist. Real-world
+/// List-Id values almost always contain "list", "users", "discuss",
+/// "forum", or "discourse" — but the bare `exists` check already
+/// catches that case. This rule is here for completeness so that
+/// senders advertising their list ID via a non-standard header
+/// (e.g., `X-List-Id`) still route correctly.
+fn rule_forums_listid_substring() -> CategoryRule {
+    CategoryRule {
+        id: "forums_listid_substring".into(),
+        display_name: "Forums — list-id substring on alternate headers".into(),
+        when: MatchExpr::Any {
+            exprs: vec![
+                MatchExpr::HeaderContains {
+                    header: "X-List-Id".into(),
+                    substring: "list".into(),
+                },
+                MatchExpr::HeaderContains {
+                    header: "X-Mailing-List".into(),
+                    substring: "list".into(),
+                },
+                MatchExpr::HeaderContains {
+                    header: "X-Loop".into(),
+                    substring: "list".into(),
+                },
+                MatchExpr::HeaderContains {
+                    header: "Sender".into(),
+                    substring: "owner-".into(),
+                },
+                MatchExpr::HeaderContains {
+                    header: "Sender".into(),
+                    substring: "-bounces@".into(),
+                },
+            ],
+        },
+        action: Action::FileInto {
+            folder: "Forums".into(),
+        },
+        score: 74,
+        stop_on_match: true,
+    }
+}
+
+/// Forums — Discourse / phpBB / Vanilla / forum subdomain senders.
+/// Discourse-style forums use `notifications@<host>` and the
+/// host typically starts with `discourse.` or `forum.` or
+/// `community.` Catch the From substring so we don't have to
+/// enumerate hostnames.
+fn rule_forums_discourse_subdomain() -> CategoryRule {
+    CategoryRule {
+        id: "forums_discourse_subdomain".into(),
+        display_name: "Forums — Discourse / forum / community subdomain senders".into(),
+        when: MatchExpr::Any {
+            exprs: vec![
+                MatchExpr::HeaderContains {
+                    header: "From".into(),
+                    substring: "@discourse.".into(),
+                },
+                MatchExpr::HeaderContains {
+                    header: "From".into(),
+                    substring: "@forum.".into(),
+                },
+                MatchExpr::HeaderContains {
+                    header: "From".into(),
+                    substring: "@forums.".into(),
+                },
+                MatchExpr::HeaderContains {
+                    header: "From".into(),
+                    substring: "@community.".into(),
+                },
+                MatchExpr::HeaderContains {
+                    header: "From".into(),
+                    substring: "@boards.".into(),
+                },
+                MatchExpr::HeaderContains {
+                    header: "From".into(),
+                    substring: "noreply@discourse".into(),
+                },
+            ],
+        },
+        action: Action::FileInto {
+            folder: "Forums".into(),
+        },
+        score: 72,
+        stop_on_match: true,
+    }
+}
+
+/// Forums — developer Q&A and community platforms. These look like
+/// service providers (so `updates_senders` would catch them) but
+/// they're discussion threads — Forums is the right home.
+fn rule_forums_dev_communities() -> CategoryRule {
+    CategoryRule {
+        id: "forums_dev_communities".into(),
+        display_name: "Forums — developer Q&A and community platforms".into(),
+        when: MatchExpr::FromDomainIn {
+            domains: vec![
+                "@stackexchange.com".into(),
+                "@stackoverflow.email".into(),
+                "@stackoverflow.com".into(),
+                "@users.rust-lang.org".into(),
+                "@discuss.kotlinlang.org".into(),
+                "@meta.discourse.org".into(),
+                "@discourse.org".into(),
+                "@quora.com".into(),
+                "@medium.com".into(),
+                "@substack.com".into(),
+            ],
+        },
+        action: Action::FileInto {
+            folder: "Forums".into(),
+        },
+        // Score 86 beats updates_senders (85) and promotions_listunsub
+        // (80) — these platforms are forums, even though they look
+        // service-shaped at the SMTP layer.
+        score: 86,
         stop_on_match: true,
     }
 }
@@ -966,6 +1239,78 @@ mod tests {
         let ids: Vec<_> = hits.iter().map(|r| r.id.as_str()).collect();
         assert!(ids.contains(&"important_priority"));
         assert!(ids.contains(&"updates_senders"), "got {ids:?}");
+    }
+
+    #[test]
+    fn security_alert_subject_routes_to_important() {
+        let rules = CategoryRules::default();
+        let h = vec![];
+        let hits = rules.evaluate(&ctx(&h, "noreply@accounts.google.com", "Security alert: new sign-in on Linux"));
+        let first = hits.first().expect("a rule fires");
+        assert_eq!(first.id, "important_security");
+        // important_security must beat updates_senders (which @google.com would otherwise hit).
+    }
+
+    #[test]
+    fn docusign_routes_to_important() {
+        let rules = CategoryRules::default();
+        let h = vec![];
+        let hits = rules.evaluate(&ctx(&h, "dse@docusign.net", "Please sign: Master Services Agreement"));
+        assert_eq!(hits.first().unwrap().id, "important_signature");
+    }
+
+    #[test]
+    fn billing_failure_routes_to_important() {
+        let rules = CategoryRules::default();
+        let h = vec![];
+        let hits = rules.evaluate(&ctx(&h, "billing@stripe.com", "Action required: payment failed"));
+        // Beats updates_senders(@stripe.com, 85) because important_billing_critical is 89.
+        assert_eq!(hits.first().unwrap().id, "important_billing_critical");
+    }
+
+    #[test]
+    fn ordinary_stripe_receipt_still_routes_to_updates() {
+        // Receipts must NOT trigger important_billing_critical.
+        let rules = CategoryRules::default();
+        let h = vec![("list-unsubscribe".into(), "<mailto:u@stripe.com>".into())];
+        let hits = rules.evaluate(&ctx(&h, "receipts@stripe.com", "Your receipt from Stripe — $14.00"));
+        assert_eq!(hits.first().unwrap().id, "updates_senders");
+    }
+
+    #[test]
+    fn discourse_subdomain_routes_to_forums() {
+        // forums_discourse_subdomain matches the "From" header substring, so
+        // tests must populate it explicitly (the in-process evaluator does
+        // not synthesize a From header from from_address).
+        let rules = CategoryRules::default();
+        let h = vec![("from".into(), "noreply@discourse.example.org".into())];
+        let hits = rules.evaluate(&ctx(&h, "noreply@discourse.example.org", "[Discussion] new topic"));
+        assert_eq!(hits.first().unwrap().id, "forums_discourse_subdomain");
+    }
+
+    #[test]
+    fn rust_users_forum_routes_to_forums_not_updates() {
+        let rules = CategoryRules::default();
+        let h = vec![];
+        let hits = rules.evaluate(&ctx(&h, "noreply@users.rust-lang.org", "Re: trait object lifetimes"));
+        // forums_dev_communities (86) beats updates_senders (85) and listunsub (80).
+        assert_eq!(hits.first().unwrap().id, "forums_dev_communities");
+    }
+
+    #[test]
+    fn stackexchange_routes_to_forums() {
+        let rules = CategoryRules::default();
+        let h = vec![];
+        let hits = rules.evaluate(&ctx(&h, "do-not-reply@stackexchange.com", "Your weekly digest"));
+        assert_eq!(hits.first().unwrap().id, "forums_dev_communities");
+    }
+
+    #[test]
+    fn alternate_listid_header_routes_to_forums() {
+        let rules = CategoryRules::default();
+        let h = vec![("x-list-id".into(), "<example-list.example.org>".into())];
+        let hits = rules.evaluate(&ctx(&h, "alice@example.org", "thread reply"));
+        assert_eq!(hits.first().unwrap().id, "forums_listid_substring");
     }
 
     #[test]
