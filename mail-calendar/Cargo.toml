@@ -13,6 +13,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
+tempfile = "3"
 
 [lints.rust]
 unsafe_code = "forbid"
