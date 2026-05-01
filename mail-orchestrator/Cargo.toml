@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 mail-config = { path = "../mail-config" }
+mail-templates = { path = "../mail-templates" }
 
 # Async runtime
 tokio = { workspace = true }

@@ -121,6 +121,93 @@ impl TemplateRenderer {
             .map(|(name, _)| name.to_string())
             .collect()
     }
+
+    /// Render a polished HTML notification email — text/plain comes
+    /// from the existing Jinja `notification.txt` template (operators
+    /// can edit copy without touching Rust), but the body is wrapped
+    /// in the [`mail_templates`] chrome (gradient hero, branded
+    /// footer, accent-stripe content card) so the message looks like
+    /// the rest of the PlausiDen email stack.
+    ///
+    /// Returns `(plain, html)` so callers can attach both as a
+    /// `multipart/alternative` over SMTP.
+    ///
+    /// # Errors
+    /// Jinja render failure on the plain side; the HTML side is
+    /// derived structurally from the same inputs and can't fail.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_polished_notification(
+        &self,
+        mailbox: &str,
+        priority: &str,
+        original_from: &str,
+        original_subject: &str,
+        original_date: &str,
+        body_preview: &str,
+        tracking_id: &str,
+    ) -> Result<(String, String)> {
+        // Plain side — through the same Jinja path operators control.
+        let plain = self.render_notification(
+            mailbox,
+            priority,
+            original_from,
+            original_subject,
+            original_date,
+            body_preview,
+            tracking_id,
+        )?;
+
+        // HTML side — typed AST through mail-templates so the chrome
+        // matches the rest of the PlausiDen email stack.
+        use mail_templates::{Block, EmailDocument, Field, GroupBody, GroupCard};
+        let priority_pretty = match priority.to_ascii_lowercase().as_str() {
+            "high" | "urgent" | "p1" => "High priority",
+            "low" | "p4" => "Low priority",
+            _ => "New message",
+        };
+
+        let preview_truncated: String = if body_preview.chars().count() > 480 {
+            let truncated: String = body_preview.chars().take(480).collect();
+            format!("{truncated}…")
+        } else {
+            body_preview.to_string()
+        };
+
+        let doc = EmailDocument {
+            subject: format!("[{mailbox}] {original_subject}"),
+            preheader: format!("From {original_from}: {original_subject}"),
+            eyebrow: Some(priority_pretty.into()),
+            heading: original_subject.to_string(),
+            intro: Some(format!(
+                "A new message arrived in {mailbox}. Preview below — open the \
+                 mailbox to read the full message."
+            )),
+            blocks: vec![
+                Block::Group(GroupCard {
+                    eyebrow: "Sender".into(),
+                    title: original_from.to_string(),
+                    subtitle: Some(format!("Sent {original_date}")),
+                    body: GroupBody::Fields(vec![
+                        Field {
+                            label: "Mailbox".into(),
+                            value: mailbox.to_string(),
+                            mono: true,
+                        },
+                        Field {
+                            label: "Priority".into(),
+                            value: priority.to_string(),
+                            mono: false,
+                        },
+                    ]),
+                    how_to: None,
+                }),
+                Block::Paragraph(preview_truncated),
+            ],
+            footer_lines: vec![format!("Tracking ID: {tracking_id}")],
+        };
+
+        Ok((plain, doc.render_html()))
+    }
 }
 
 #[cfg(test)]
@@ -207,10 +294,8 @@ mod tests {
 
     #[test]
     fn from_strings_works() {
-        let renderer = TemplateRenderer::from_strings(&[
-            ("test.txt", "Hello {{ name }}!"),
-        ])
-        .unwrap();
+        let renderer =
+            TemplateRenderer::from_strings(&[("test.txt", "Hello {{ name }}!")]).unwrap();
         let result = renderer
             .render("test.txt", context! { name => "Tim" })
             .unwrap();
@@ -230,13 +315,54 @@ mod tests {
     }
 
     #[test]
+    fn render_polished_notification_returns_plain_and_html() {
+        let (_tmp, renderer) = setup_templates();
+        let (plain, html) = renderer
+            .render_polished_notification(
+                "support@sacred.vote",
+                "high",
+                "voter@example.com",
+                "Need help with voting",
+                "2026-04-05 12:00:00",
+                "I can't find my voter code...",
+                "abc-123",
+            )
+            .unwrap();
+        // Plain matches the Jinja template path.
+        assert!(plain.contains("support@sacred.vote"));
+        assert!(plain.contains("voter@example.com"));
+        // HTML uses the polished mail-templates chrome.
+        assert!(html.contains("<!DOCTYPE html>"));
+        assert!(html.contains("Need help with voting"));
+        assert!(html.contains("voter@example.com"));
+        assert!(html.contains("Tracking ID: abc-123"));
+        // Eyebrow pill maps high priority to "High priority".
+        assert!(html.contains("High priority"));
+        // No <style> blocks (email-client safe).
+        assert!(!html.contains("<style"));
+    }
+
+    #[test]
+    fn render_polished_notification_truncates_long_preview() {
+        let (_tmp, renderer) = setup_templates();
+        let long_preview = "x".repeat(1000);
+        let (_, html) = renderer
+            .render_polished_notification("m@x", "low", "f@x", "subj", "2026", &long_preview, "id")
+            .unwrap();
+        // Truncated to 480 chars + ellipsis on the HTML side.
+        assert!(html.contains("xxxx…"));
+        assert!(!html.contains(&"x".repeat(500)));
+    }
+
+    #[test]
     fn special_chars_escaped_in_output() {
-        let renderer = TemplateRenderer::from_strings(&[
-            ("test.txt", "Subject: {{ subject }}"),
-        ])
-        .unwrap();
+        let renderer =
+            TemplateRenderer::from_strings(&[("test.txt", "Subject: {{ subject }}")]).unwrap();
         let result = renderer
-            .render("test.txt", context! { subject => "Hello <world> & \"friends\"" })
+            .render(
+                "test.txt",
+                context! { subject => "Hello <world> & \"friends\"" },
+            )
             .unwrap();
         // MiniJinja auto-escapes in HTML mode but not in text templates
         assert!(result.contains("Hello"));
