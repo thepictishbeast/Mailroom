@@ -10,6 +10,12 @@ repository.workspace = true
 name = "mail-orchestrator"
 path = "src/main.rs"
 
+# Postfix content-filter that wraps bounce / DSN messages in branded HTML.
+# Hooked from non_smtpd_header_checks via FILTER bounce_pretty:.
+[[bin]]
+name = "bounce-pretty"
+path = "src/bin/bounce_pretty.rs"
+
 [dependencies]
 mail-config = { path = "../mail-config" }
 mail-templates = { path = "../mail-templates" }
