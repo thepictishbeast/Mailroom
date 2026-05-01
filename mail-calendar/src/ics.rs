@@ -246,9 +246,9 @@ fn parse_event(c: &Component) -> Result<CalendarEvent, IcsError> {
             property: "UID",
         })?
         .to_string();
-    let summary = c.prop_value("SUMMARY").unwrap_or("").to_string();
-    let description = c.prop_value("DESCRIPTION").unwrap_or("").to_string();
-    let location = c.prop_value("LOCATION").unwrap_or("").to_string();
+    let summary = unescape_text(c.prop_value("SUMMARY").unwrap_or(""));
+    let description = unescape_text(c.prop_value("DESCRIPTION").unwrap_or(""));
+    let location = unescape_text(c.prop_value("LOCATION").unwrap_or(""));
     let dtstart_raw = c.prop_value("DTSTART").ok_or(IcsError::MissingProperty {
         component: "VEVENT",
         property: "DTSTART",
@@ -309,8 +309,8 @@ fn parse_todo(c: &Component) -> Result<CalendarTodo, IcsError> {
             property: "UID",
         })?
         .to_string();
-    let summary = c.prop_value("SUMMARY").unwrap_or("").to_string();
-    let description = c.prop_value("DESCRIPTION").unwrap_or("").to_string();
+    let summary = unescape_text(c.prop_value("SUMMARY").unwrap_or(""));
+    let description = unescape_text(c.prop_value("DESCRIPTION").unwrap_or(""));
     let due = c
         .prop_value("DUE")
         .map(|raw| parse_datetime(raw, "DUE"))
@@ -364,7 +364,7 @@ fn parse_nested_alarm(
     };
     Ok(Some(Reminder {
         trigger,
-        description: c.prop_value("DESCRIPTION").unwrap_or("").to_string(),
+        description: unescape_text(c.prop_value("DESCRIPTION").unwrap_or("")),
     }))
 }
 
@@ -383,7 +383,7 @@ fn parse_standalone_alarm(c: &Component) -> Result<CalendarAlarm, IcsError> {
     let (trigger, _) = parse_datetime(trigger_raw, "TRIGGER")?;
     Ok(CalendarAlarm {
         trigger,
-        description: c.prop_value("DESCRIPTION").unwrap_or("").to_string(),
+        description: unescape_text(c.prop_value("DESCRIPTION").unwrap_or("")),
     })
 }
 
@@ -460,6 +460,275 @@ fn parse_cal_address(prop: &Property) -> Person {
     let email = prop.value.trim_start_matches("mailto:").to_string();
     let name = prop.params.get("CN").cloned().unwrap_or_default();
     Person { email, name }
+}
+
+/// RFC 5545 §3.3.11 unescape: inverse of [`escape_text`]. Invalid
+/// trailing backslash (one without a following char) is preserved
+/// literally — the spec is silent on bad input and round-tripping
+/// invalid escapes lossy is worse than lossless.
+fn unescape_text(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('\\') => out.push('\\'),
+                Some(',') => out.push(','),
+                Some(';') => out.push(';'),
+                Some('n' | 'N') => out.push('\n'),
+                Some(other) => {
+                    out.push('\\');
+                    out.push(other);
+                }
+                None => out.push('\\'),
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+// ----- Writer: typed → ICS bytes -----------------------------------
+//
+// The inverse of [`parse_ics`]. Re-emits a `Vec<CalendarItem>` as a
+// single VCALENDAR document the consumer can PUT to a CalDAV
+// endpoint, attach to an outgoing email, or save to disk.
+//
+// The writer is intentionally minimal: pure structured output, no
+// ML-shaped fields (RRULE, RECURRENCE-ID, EXDATE), no timezone
+// definitions (everything is UTC-stamped with the trailing Z).
+// Adding those is a v0.1 / v1.0 concern after we have a downstream
+// adapter that needs them.
+
+/// Serialize a list of calendar items to a single VCALENDAR ICS
+/// document.
+///
+/// The output is RFC 5545 line-folded (CRLF + leading space at
+/// 75 octets), TEXT-escaped (`,;\n\\`), and UTC-only. All-day
+/// events emit `DTSTART;VALUE=DATE:YYYYMMDD` so receivers don't
+/// double-shift across timezones.
+///
+/// PRODID identifies the producer for receiver-side debugging.
+#[must_use]
+pub fn write_ics(items: &[CalendarItem]) -> String {
+    let mut out = String::with_capacity(256 + items.len() * 256);
+    out.push_str("BEGIN:VCALENDAR\r\n");
+    out.push_str("VERSION:2.0\r\n");
+    out.push_str("PRODID:-//PlausiDen//mail-calendar 0.1//EN\r\n");
+    out.push_str("CALSCALE:GREGORIAN\r\n");
+
+    let now = Utc::now();
+    for item in items {
+        match item {
+            CalendarItem::Event(e) => write_event(e, now, &mut out),
+            CalendarItem::Todo(t) => write_todo(t, now, &mut out),
+            CalendarItem::Alarm(a) => write_standalone_alarm(a, &mut out),
+        }
+    }
+
+    out.push_str("END:VCALENDAR\r\n");
+    out
+}
+
+fn write_event(e: &CalendarEvent, now: DateTime<Utc>, out: &mut String) {
+    out.push_str("BEGIN:VEVENT\r\n");
+    write_line(out, "UID", &e.uid);
+    write_line_raw(out, "DTSTAMP", &fmt_datetime_z(now));
+    if e.all_day {
+        // For all-day events: DATE-only form, no time, no Z.
+        write_line_raw(
+            out,
+            "DTSTART;VALUE=DATE",
+            &e.start.format("%Y%m%d").to_string(),
+        );
+        write_line_raw(
+            out,
+            "DTEND;VALUE=DATE",
+            &e.end.format("%Y%m%d").to_string(),
+        );
+    } else {
+        write_line_raw(out, "DTSTART", &fmt_datetime_z(e.start));
+        write_line_raw(out, "DTEND", &fmt_datetime_z(e.end));
+    }
+    write_line(out, "SUMMARY", &e.summary);
+    if !e.description.is_empty() {
+        write_line(out, "DESCRIPTION", &e.description);
+    }
+    if !e.location.is_empty() {
+        write_line(out, "LOCATION", &e.location);
+    }
+    write_line_raw(out, "STATUS", event_status_str(e.status));
+    write_line_raw(out, "CLASS", event_class_str(e.class));
+    if let Some(org) = &e.organizer {
+        write_cal_address(out, "ORGANIZER", org);
+    }
+    for att in &e.attendees {
+        write_cal_address(out, "ATTENDEE", att);
+    }
+    for r in &e.reminders {
+        write_reminder(r, out);
+    }
+    out.push_str("END:VEVENT\r\n");
+}
+
+fn write_todo(t: &CalendarTodo, now: DateTime<Utc>, out: &mut String) {
+    out.push_str("BEGIN:VTODO\r\n");
+    write_line(out, "UID", &t.uid);
+    write_line_raw(out, "DTSTAMP", &fmt_datetime_z(now));
+    write_line(out, "SUMMARY", &t.summary);
+    if !t.description.is_empty() {
+        write_line(out, "DESCRIPTION", &t.description);
+    }
+    if let Some(due) = t.due {
+        write_line_raw(out, "DUE", &fmt_datetime_z(due));
+    }
+    write_line_raw(out, "STATUS", todo_status_str(t.status));
+    if t.priority > 0 {
+        write_line_raw(out, "PRIORITY", &t.priority.to_string());
+    }
+    for r in &t.reminders {
+        write_reminder(r, out);
+    }
+    out.push_str("END:VTODO\r\n");
+}
+
+fn write_reminder(r: &Reminder, out: &mut String) {
+    out.push_str("BEGIN:VALARM\r\n");
+    out.push_str("ACTION:DISPLAY\r\n");
+    let desc = if r.description.is_empty() {
+        "Reminder"
+    } else {
+        &r.description
+    };
+    write_line(out, "DESCRIPTION", desc);
+    write_line_raw(out, "TRIGGER;VALUE=DATE-TIME", &fmt_datetime_z(r.trigger));
+    out.push_str("END:VALARM\r\n");
+}
+
+fn write_standalone_alarm(a: &CalendarAlarm, out: &mut String) {
+    out.push_str("BEGIN:VALARM\r\n");
+    out.push_str("ACTION:DISPLAY\r\n");
+    let desc = if a.description.is_empty() {
+        "Alarm"
+    } else {
+        &a.description
+    };
+    write_line(out, "DESCRIPTION", desc);
+    write_line_raw(out, "TRIGGER;VALUE=DATE-TIME", &fmt_datetime_z(a.trigger));
+    out.push_str("END:VALARM\r\n");
+}
+
+fn write_cal_address(out: &mut String, prop_name: &str, p: &Person) {
+    let mut header = prop_name.to_string();
+    if !p.name.is_empty() {
+        // Quote CN if it contains characters that require it (`,;:`).
+        let needs_quote = p.name.chars().any(|c| matches!(c, ',' | ';' | ':'));
+        let cn_value = if needs_quote {
+            format!("\"{}\"", p.name.replace('"', ""))
+        } else {
+            p.name.clone()
+        };
+        header.push_str(&format!(";CN={cn_value}"));
+    }
+    let value = format!("mailto:{}", p.email);
+    let line = format!("{header}:{value}");
+    out.push_str(&fold_line(&line));
+    out.push_str("\r\n");
+}
+
+/// Write a TEXT property — escapes special chars per RFC 5545 and
+/// applies line folding.
+fn write_line(out: &mut String, name: &str, value: &str) {
+    let line = format!("{name}:{}", escape_text(value));
+    out.push_str(&fold_line(&line));
+    out.push_str("\r\n");
+}
+
+/// Write a property whose value is already RFC 5545–shaped (e.g.,
+/// pre-formatted DATE-TIME, enum string). Skips TEXT escaping but
+/// still folds.
+fn write_line_raw(out: &mut String, name: &str, value: &str) {
+    let line = format!("{name}:{value}");
+    out.push_str(&fold_line(&line));
+    out.push_str("\r\n");
+}
+
+/// RFC 5545 §3.3.11 escape: `\\` for backslash, `\,` for comma,
+/// `\;` for semicolon, `\n` for newline (literal `\n`, not actual
+/// LF). Colon does NOT get escaped — colons are common in URLs.
+fn escape_text(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 8);
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str(r"\\"),
+            ',' => out.push_str(r"\,"),
+            ';' => out.push_str(r"\;"),
+            '\n' => out.push_str(r"\n"),
+            '\r' => {} // strip — folding handles wrap
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// RFC 5545 §3.1 line folding: any line longer than 75 octets is
+/// broken with CRLF + a single space. Returns the folded result,
+/// without the trailing CRLF (caller appends).
+///
+/// The 75-octet limit is conservative — the spec mentions 75
+/// octets, with 76 the absolute limit; we pick 75 to stay safely
+/// under across UTF-8 multi-byte char boundaries.
+fn fold_line(line: &str) -> String {
+    const LIMIT: usize = 75;
+    if line.len() <= LIMIT {
+        return line.to_string();
+    }
+    let mut out = String::with_capacity(line.len() + 8);
+    let bytes = line.as_bytes();
+    let mut start = 0;
+    while start < bytes.len() {
+        let mut end = (start + LIMIT).min(bytes.len());
+        // Don't split inside a multi-byte UTF-8 char.
+        while end < bytes.len() && (bytes[end] & 0xC0) == 0x80 {
+            end -= 1;
+        }
+        if start > 0 {
+            out.push_str("\r\n ");
+        }
+        out.push_str(std::str::from_utf8(&bytes[start..end]).unwrap_or(""));
+        start = end;
+    }
+    out
+}
+
+fn fmt_datetime_z(dt: DateTime<Utc>) -> String {
+    dt.format("%Y%m%dT%H%M%SZ").to_string()
+}
+
+const fn event_status_str(s: EventStatus) -> &'static str {
+    match s {
+        EventStatus::Confirmed => "CONFIRMED",
+        EventStatus::Tentative => "TENTATIVE",
+        EventStatus::Cancelled => "CANCELLED",
+    }
+}
+
+const fn event_class_str(c: EventClass) -> &'static str {
+    match c {
+        EventClass::Public => "PUBLIC",
+        EventClass::Private => "PRIVATE",
+        EventClass::Confidential => "CONFIDENTIAL",
+    }
+}
+
+const fn todo_status_str(s: TodoStatus) -> &'static str {
+    match s {
+        TodoStatus::NeedsAction => "NEEDS-ACTION",
+        TodoStatus::InProcess => "IN-PROCESS",
+        TodoStatus::Completed => "COMPLETED",
+        TodoStatus::Cancelled => "CANCELLED",
+    }
 }
 
 #[cfg(test)]
@@ -646,5 +915,175 @@ END:VCALENDAR\r\n";
         let ics = "BEGIN:VCALENDAR\r\nBEGIN:VTIMEZONE\r\nTZID:UTC\r\nEND:VTIMEZONE\r\nBEGIN:VEVENT\r\nUID:e1\r\nDTSTART:20260501T143000Z\r\nDTEND:20260501T153000Z\r\nSUMMARY:e1\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
         let items = parse_ics(ics).unwrap();
         assert_eq!(items.len(), 1);
+    }
+
+    // ----- Writer tests --------------------------------------------
+
+    fn sample_event() -> CalendarEvent {
+        CalendarEvent {
+            uid: "evt-1@example.com".into(),
+            summary: "Standup".into(),
+            description: "Daily, all hands".into(),
+            start: "2026-05-02T14:00:00Z".parse().unwrap(),
+            end: "2026-05-02T14:30:00Z".parse().unwrap(),
+            all_day: false,
+            location: "Zoom: https://zoom.us/j/123".into(),
+            status: EventStatus::Confirmed,
+            class: EventClass::Public,
+            organizer: Some(Person {
+                email: "tim@example.com".into(),
+                name: "Tim Porter".into(),
+            }),
+            attendees: vec![Person {
+                email: "alice@example.com".into(),
+                name: "Alice".into(),
+            }],
+            reminders: vec![Reminder {
+                trigger: "2026-05-02T13:45:00Z".parse().unwrap(),
+                description: String::new(),
+            }],
+        }
+    }
+
+    #[test]
+    fn write_event_emits_required_props() {
+        let ics = write_ics(&[CalendarItem::Event(sample_event())]);
+        assert!(ics.starts_with("BEGIN:VCALENDAR\r\n"));
+        assert!(ics.contains("BEGIN:VEVENT\r\n"));
+        assert!(ics.contains("UID:evt-1@example.com\r\n"));
+        assert!(ics.contains("DTSTART:20260502T140000Z\r\n"));
+        assert!(ics.contains("DTEND:20260502T143000Z\r\n"));
+        assert!(ics.contains("SUMMARY:Standup\r\n"));
+        assert!(ics.contains("STATUS:CONFIRMED\r\n"));
+        assert!(ics.contains("CLASS:PUBLIC\r\n"));
+        assert!(ics.contains("ORGANIZER;CN=Tim Porter:mailto:tim@example.com\r\n"));
+        assert!(ics.contains("ATTENDEE;CN=Alice:mailto:alice@example.com\r\n"));
+        assert!(ics.contains("END:VEVENT\r\n"));
+        assert!(ics.ends_with("END:VCALENDAR\r\n"));
+    }
+
+    #[test]
+    fn write_event_escapes_text_fields() {
+        let mut e = sample_event();
+        e.summary = "needs, escaping; and\\here".into();
+        e.description = "line1\nline2".into();
+        let ics = write_ics(&[CalendarItem::Event(e)]);
+        assert!(ics.contains(r"SUMMARY:needs\, escaping\; and\\here"));
+        assert!(ics.contains(r"DESCRIPTION:line1\nline2"));
+    }
+
+    #[test]
+    fn write_event_round_trips_through_parse() {
+        // Round-trip: parse(write(x)) should produce a CalendarItem
+        // equal to x for all fields except DTSTAMP (which is regenerated
+        // at write time).
+        let original = sample_event();
+        let ics = write_ics(&[CalendarItem::Event(original.clone())]);
+        let parsed = parse_ics(&ics).expect("parse should succeed");
+        assert_eq!(parsed.len(), 1);
+        let CalendarItem::Event(round_tripped) = &parsed[0] else {
+            panic!("expected event, got {:?}", parsed[0]);
+        };
+        assert_eq!(round_tripped.uid, original.uid);
+        assert_eq!(round_tripped.summary, original.summary);
+        assert_eq!(round_tripped.description, original.description);
+        assert_eq!(round_tripped.start, original.start);
+        assert_eq!(round_tripped.end, original.end);
+        assert_eq!(round_tripped.location, original.location);
+        assert_eq!(round_tripped.status, original.status);
+        assert_eq!(round_tripped.class, original.class);
+        assert_eq!(round_tripped.organizer, original.organizer);
+        assert_eq!(round_tripped.attendees, original.attendees);
+        assert_eq!(round_tripped.reminders.len(), original.reminders.len());
+        assert_eq!(round_tripped.reminders[0].trigger, original.reminders[0].trigger);
+    }
+
+    #[test]
+    fn write_all_day_event_uses_date_form() {
+        let mut e = sample_event();
+        e.all_day = true;
+        e.start = "2026-05-04T00:00:00Z".parse().unwrap();
+        e.end = "2026-05-05T00:00:00Z".parse().unwrap();
+        let ics = write_ics(&[CalendarItem::Event(e)]);
+        assert!(ics.contains("DTSTART;VALUE=DATE:20260504\r\n"));
+        assert!(ics.contains("DTEND;VALUE=DATE:20260505\r\n"));
+        // No time-portion form should appear for the all-day case.
+        assert!(!ics.contains("DTSTART:20260504T"));
+    }
+
+    #[test]
+    fn write_todo_round_trips() {
+        let original = CalendarTodo {
+            uid: "todo-1@example.com".into(),
+            summary: "Buy groceries".into(),
+            description: String::new(),
+            due: Some("2026-05-03T17:00:00Z".parse().unwrap()),
+            status: TodoStatus::NeedsAction,
+            priority: 5,
+            reminders: vec![],
+        };
+        let ics = write_ics(&[CalendarItem::Todo(original.clone())]);
+        assert!(ics.contains("BEGIN:VTODO\r\n"));
+        assert!(ics.contains("UID:todo-1@example.com"));
+        assert!(ics.contains("DUE:20260503T170000Z"));
+        assert!(ics.contains("STATUS:NEEDS-ACTION"));
+        assert!(ics.contains("PRIORITY:5"));
+
+        let parsed = parse_ics(&ics).expect("parse");
+        let CalendarItem::Todo(rt) = &parsed[0] else {
+            panic!("expected todo, got {:?}", parsed[0]);
+        };
+        assert_eq!(rt.uid, original.uid);
+        assert_eq!(rt.summary, original.summary);
+        assert_eq!(rt.due, original.due);
+        assert_eq!(rt.status, original.status);
+        assert_eq!(rt.priority, original.priority);
+    }
+
+    #[test]
+    fn write_emits_calendar_chrome() {
+        let ics = write_ics(&[]);
+        assert!(ics.contains("VERSION:2.0\r\n"));
+        assert!(ics.contains("PRODID:-//PlausiDen//mail-calendar 0.1//EN\r\n"));
+        assert!(ics.contains("CALSCALE:GREGORIAN\r\n"));
+        assert!(ics.starts_with("BEGIN:VCALENDAR\r\n"));
+        assert!(ics.ends_with("END:VCALENDAR\r\n"));
+    }
+
+    #[test]
+    fn fold_long_lines_at_75_octets() {
+        let line = format!("DESCRIPTION:{}", "x".repeat(200));
+        let folded = fold_line(&line);
+        for chunk in folded.split("\r\n") {
+            // Each segment fits in 75 octets (continuation chunks
+            // include the leading space which counts).
+            assert!(chunk.len() <= 76, "chunk too long: {}", chunk.len());
+        }
+        // Continuation lines start with a single space.
+        assert!(folded.contains("\r\n "));
+    }
+
+    #[test]
+    fn round_trip_with_long_description() {
+        let mut e = sample_event();
+        e.description = "x".repeat(300);
+        let ics = write_ics(&[CalendarItem::Event(e.clone())]);
+        let parsed = parse_ics(&ics).expect("parse");
+        let CalendarItem::Event(rt) = &parsed[0] else {
+            panic!()
+        };
+        // After fold + unfold, the body comes back identical.
+        assert_eq!(rt.description, e.description);
+    }
+
+    #[test]
+    fn cn_with_special_chars_is_quoted() {
+        let mut e = sample_event();
+        e.organizer = Some(Person {
+            email: "pat@x".into(),
+            name: "O'Brien, Pat".into(),
+        });
+        let ics = write_ics(&[CalendarItem::Event(e)]);
+        assert!(ics.contains(r#"ORGANIZER;CN="O'Brien, Pat":mailto:pat@x"#));
     }
 }

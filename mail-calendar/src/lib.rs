@@ -51,7 +51,7 @@
 pub mod ics;
 pub mod item;
 
-pub use ics::{parse_ics, IcsError};
+pub use ics::{parse_ics, write_ics, IcsError};
 pub use item::{
     CalendarAlarm, CalendarEvent, CalendarItem, CalendarTodo, EventClass, EventStatus, Person,
     Reminder, TodoStatus,
