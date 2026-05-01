@@ -165,6 +165,31 @@ enum Commands {
     /// through this and you'll see exactly what the deployed Sieve
     /// would do — same code path the Thundercrab client uses offline.
     Classify,
+
+    /// Parse an ICS payload from stdin and print typed CalendarItems.
+    /// Useful for inspecting `.ics` attachments — pipe `doveadm fetch
+    /// ... part 2.0` (or any source) through this and confirm what
+    /// `mail-calendar::parse_ics` extracts.
+    CalendarParse {
+        /// Output format: `summary` (one-line per item), `json`
+        /// (full typed JSON), or `ics` (round-trip — re-emit ICS).
+        #[arg(long, default_value = "summary")]
+        format: String,
+    },
+
+    /// Merge an ICS payload from stdin into a calendar file at `path`,
+    /// keyed by UID. Items in the incoming payload that match an
+    /// existing UID replace it in place; new UIDs are appended;
+    /// existing items not mentioned in the incoming payload are
+    /// preserved (partial sync).
+    ///
+    /// Atomic — writes to a tempfile in the same directory and
+    /// renames, so a reader never sees a half-written calendar.
+    CalendarMerge {
+        /// Path to the calendar file. Created if missing.
+        #[arg(long)]
+        path: PathBuf,
+    },
 }
 
 fn main() -> Result<()> {
@@ -192,7 +217,92 @@ fn main() -> Result<()> {
             cmd_emit_all(stdout, audit_headers, force)
         }
         Commands::Classify => cmd_classify(),
+        Commands::CalendarParse { format } => cmd_calendar_parse(&format),
+        Commands::CalendarMerge { path } => cmd_calendar_merge(&path),
     }
+}
+
+// ---------------------------------------------------------------------
+// calendar — parse + merge
+// ---------------------------------------------------------------------
+
+fn cmd_calendar_parse(format: &str) -> Result<()> {
+    use std::io::Read as _;
+    let mut buf = String::new();
+    std::io::stdin().read_to_string(&mut buf)?;
+    let items = mail_calendar::parse_ics(&buf)
+        .map_err(|e| anyhow::anyhow!("parse_ics: {e}"))?;
+
+    match format {
+        "json" => {
+            let json = serde_json::to_string_pretty(&items)?;
+            println!("{json}");
+        }
+        "ics" => {
+            print!("{}", mail_calendar::write_ics(&items));
+        }
+        "summary" | _ => {
+            println!("{} item(s):", items.len());
+            for item in &items {
+                match item {
+                    mail_calendar::CalendarItem::Event(e) => {
+                        println!(
+                            "  EVENT  {uid}  {start} → {end}  {summary}",
+                            uid = e.uid,
+                            start = e.start.format("%Y-%m-%d %H:%M"),
+                            end = e.end.format("%H:%M"),
+                            summary = e.summary,
+                        );
+                    }
+                    mail_calendar::CalendarItem::Todo(t) => {
+                        let due = t
+                            .due
+                            .map_or_else(|| "(no due)".to_string(), |d| d.format("%Y-%m-%d").to_string());
+                        println!(
+                            "  TODO   {uid}  due {due}  {summary}",
+                            uid = t.uid,
+                            summary = t.summary,
+                        );
+                    }
+                    mail_calendar::CalendarItem::Alarm(a) => {
+                        println!(
+                            "  ALARM  {trigger}  {desc}",
+                            trigger = a.trigger.format("%Y-%m-%d %H:%M"),
+                            desc = a.description,
+                        );
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn cmd_calendar_merge(path: &Path) -> Result<()> {
+    use std::io::Read as _;
+    let mut buf = String::new();
+    std::io::stdin().read_to_string(&mut buf)?;
+    let incoming = mail_calendar::parse_ics(&buf)
+        .map_err(|e| anyhow::anyhow!("parse_ics on stdin: {e}"))?;
+    let report = mail_calendar::merge::merge_to_file(path, &incoming)
+        .map_err(|e| anyhow::anyhow!("merge_to_file: {e}"))?;
+
+    eprintln!(
+        "merged: {added} added · {updated} updated · {alarms} alarms · {total} total in {p}",
+        added = report.added_count(),
+        updated = report.updated_count(),
+        alarms = report.alarms_count(),
+        total = report.outcomes.len(),
+        p = path.display(),
+    );
+    for outcome in &report.outcomes {
+        match outcome {
+            mail_calendar::MergeOutcome::Added(uid) => eprintln!("  + {uid}"),
+            mail_calendar::MergeOutcome::Updated(uid) => eprintln!("  ~ {uid}"),
+            mail_calendar::MergeOutcome::AppendedAlarm => eprintln!("  ! standalone alarm"),
+        }
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------
