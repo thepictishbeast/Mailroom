@@ -1,0 +1,15 @@
+[package]
+name = "mail-templates"
+description = "Branded HTML/plain transactional email rendering for the PlausiDen mail stack. Group cards + concise how-tos, table-based + inline-styled output."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "mail_templates"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }

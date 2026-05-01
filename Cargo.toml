@@ -5,6 +5,7 @@ members = [
     "mail-config",
     "mail-cli",
     "mail-calendar",
+    "mail-templates",
 ]
 
 [workspace.package]
