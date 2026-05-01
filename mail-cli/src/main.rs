@@ -548,11 +548,14 @@ fn cmd_validate() -> Result<()> {
         Err(e) => { println!("FAIL: {}", e); errors += 1; }
     }
 
-    // Check DKIM config files
+    // Check DKIM config files. Use the resolver functions so verify-config
+    // works on Debian (lowercase key.table / signing.table / trusted.hosts)
+    // as well as RHEL/Fedora (CamelCase). The resolver falls back to the
+    // canonical path on a fresh box where neither variant exists yet.
     for (name, path) in [
-        ("KeyTable", mail_config::dkim::KEY_TABLE_PATH),
-        ("SigningTable", mail_config::dkim::SIGNING_TABLE_PATH),
-        ("TrustedHosts", mail_config::dkim::TRUSTED_HOSTS_PATH),
+        ("KeyTable", mail_config::dkim::resolve_key_table_path()),
+        ("SigningTable", mail_config::dkim::resolve_signing_table_path()),
+        ("TrustedHosts", mail_config::dkim::resolve_trusted_hosts_path()),
     ] {
         print!("  OpenDKIM {} ({})... ", name, path);
         match std::fs::metadata(path) {
