@@ -46,12 +46,12 @@ pub(crate) fn render(doc: &EmailDocument) -> String {
 fn render_block(block: &Block, out: &mut String) {
     match block {
         Block::Group(g) => render_group(g, out),
-        Block::SectionHeading(h) => {
+        Block::SectionHeading { text: h } => {
             let _ = writeln!(out, "{}", h);
             let _ = writeln!(out, "{}", &RULE_LIGHT[..h.chars().count().min(60).max(4)]);
             out.push('\n');
         }
-        Block::Paragraph(p) => {
+        Block::Paragraph { text: p } => {
             out.push_str(&wrap(p, WRAP));
             out.push_str("\n\n");
         }
@@ -70,12 +70,12 @@ fn render_group(g: &GroupCard, out: &mut String) {
     let _ = writeln!(out, "{}", &RULE_LIGHT[..(g.title.chars().count() + g.eyebrow.chars().count() + 3).min(60).max(8)]);
 
     match &g.body {
-        GroupBody::Fields(fields) => {
+        GroupBody::Fields { fields } => {
             for f in fields {
                 render_field(f, out);
             }
         }
-        GroupBody::Records(records) => {
+        GroupBody::Records { records } => {
             for (i, r) in records.iter().enumerate() {
                 if i > 0 {
                     out.push('\n');

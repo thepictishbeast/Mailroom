@@ -65,7 +65,7 @@ pub fn dns_records(groups: Vec<DnsGroup>, dig_commands: Vec<String>) -> EmailDoc
             eyebrow: g.eyebrow.clone(),
             title: g.title.clone(),
             subtitle: g.subtitle.clone(),
-            body: GroupBody::Records(records),
+            body: GroupBody::Records { records },
             how_to: g.how_to.clone(),
         }));
     }
@@ -75,12 +75,12 @@ pub fn dns_records(groups: Vec<DnsGroup>, dig_commands: Vec<String>) -> EmailDoc
             eyebrow: Some("Verification".into()),
             lines: dig_commands,
         }));
-        blocks.push(Block::Paragraph(
-            "Each command should print at least one line once propagated \
-             (typically 5–30 min at the registrar). Empty output = not yet \
-             visible."
+        blocks.push(Block::Paragraph {
+            text: "Each command should print at least one line once propagated \
+                   (typically 5–30 min at the registrar). Empty output = not \
+                   yet visible."
                 .into(),
-        ));
+        });
     }
 
     EmailDocument {
@@ -169,12 +169,12 @@ pub fn bounce(
     };
 
     let blocks: Vec<Block> = vec![
-        Block::Paragraph(why.into()),
+        Block::Paragraph { text: why.into() },
         Block::Group(GroupCard {
             eyebrow: "Failed delivery".into(),
             title: "What we tried to deliver".into(),
             subtitle: None,
-            body: GroupBody::Fields(vec![
+            body: GroupBody::Fields { fields: vec![
                 Field {
                     label: "To".into(),
                     value: failed_recipient.into(),
@@ -190,15 +190,15 @@ pub fn bounce(
                     value: diagnostic.into(),
                     mono: true,
                 },
-            ]),
+            ] },
             how_to: None,
         }),
-        Block::Paragraph(
-            "Your original message is attached as a copy at the end of \
-             this email — feel free to copy the body and re-send to a \
-             corrected address."
+        Block::Paragraph {
+            text: "Your original message is attached as a copy at the end of \
+                   this email — feel free to copy the body and re-send to a \
+                   corrected address."
                 .into(),
-        ),
+        },
         Block::Cta(Cta {
             label: "Email postmaster".into(),
             href: "mailto:postmaster@plausiden.com".into(),
@@ -226,11 +226,11 @@ pub fn bounce(
 #[must_use]
 pub fn magic_link(link: &str) -> EmailDocument {
     let blocks = vec![
-        Block::Paragraph(
-            "Click the button below within 15 minutes to sign in. The link \
-             is single-use — once you click it, it can't be reused."
+        Block::Paragraph {
+            text: "Click the button below within 15 minutes to sign in. The \
+                   link is single-use — once you click it, it can't be reused."
                 .into(),
-        ),
+        },
         Block::Cta(Cta {
             label: "Sign in →".into(),
             href: link.into(),
@@ -239,18 +239,18 @@ pub fn magic_link(link: &str) -> EmailDocument {
             eyebrow: "Fallback".into(),
             title: "If the button doesn't work".into(),
             subtitle: Some("Paste this URL directly into your browser.".into()),
-            body: GroupBody::Fields(vec![Field {
+            body: GroupBody::Fields { fields: vec![Field {
                 label: "URL".into(),
                 value: link.into(),
                 mono: true,
-            }]),
+            }] },
             how_to: None,
         }),
-        Block::Paragraph(
-            "Didn't request this? You can safely ignore this email — \
-             the link will expire on its own."
+        Block::Paragraph {
+            text: "Didn't request this? You can safely ignore this email — \
+                   the link will expire on its own."
                 .into(),
-        ),
+        },
     ];
 
     EmailDocument {

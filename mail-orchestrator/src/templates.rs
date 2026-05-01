@@ -187,7 +187,7 @@ impl TemplateRenderer {
                     eyebrow: "Sender".into(),
                     title: original_from.to_string(),
                     subtitle: Some(format!("Sent {original_date}")),
-                    body: GroupBody::Fields(vec![
+                    body: GroupBody::Fields { fields: vec![
                         Field {
                             label: "Mailbox".into(),
                             value: mailbox.to_string(),
@@ -198,10 +198,12 @@ impl TemplateRenderer {
                             value: priority.to_string(),
                             mono: false,
                         },
-                    ]),
+                    ] },
                     how_to: None,
                 }),
-                Block::Paragraph(preview_truncated),
+                Block::Paragraph {
+                    text: preview_truncated,
+                },
             ],
             footer_lines: vec![format!("Tracking ID: {tracking_id}")],
         };

@@ -10,6 +10,12 @@ repository.workspace = true
 name = "mail_templates"
 path = "src/lib.rs"
 
+# `mail-tpl` — CLI for rendering an EmailDocument JSON to HTML + plain
+# Useful for operator scripts, cron jobs, ad-hoc one-shot polished mail.
+[[bin]]
+name = "mail-tpl"
+path = "src/bin/mail-tpl.rs"
+
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }

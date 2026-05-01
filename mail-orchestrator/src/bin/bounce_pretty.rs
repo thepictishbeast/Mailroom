@@ -177,7 +177,10 @@ fn classify_status(status: &str, diagnostic: &str) -> BounceReason {
     BounceReason::Other
 }
 
-/// Case-insensitive `str::strip_prefix`.
+/// Case-insensitive `str::strip_prefix`. Used only by tests now;
+/// the production parser path uses [`unfold_header_lines`] which
+/// handles continuation lines properly.
+#[cfg(test)]
 fn strip_prefix_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
     if s.len() >= prefix.len() && s[..prefix.len()].eq_ignore_ascii_case(prefix) {
         Some(&s[prefix.len()..])

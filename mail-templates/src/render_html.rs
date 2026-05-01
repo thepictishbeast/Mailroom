@@ -138,19 +138,19 @@ pub(crate) fn render(doc: &EmailDocument, theme: &Theme) -> String {
 fn render_block(block: &Block, theme: &Theme, out: &mut String) {
     match block {
         Block::Group(g) => render_group(g, theme, out),
-        Block::SectionHeading(h) => {
+        Block::SectionHeading { text } => {
             let _ = write!(
                 out,
                 r#"<h2 style="margin:30px 0 14px;font-size:18px;font-weight:700;color:{heading};letter-spacing:-0.01em;font-family:{FONT_SANS};">{}</h2>"#,
-                esc(h),
+                esc(text),
                 heading = theme.text_heading,
             );
         }
-        Block::Paragraph(p) => {
+        Block::Paragraph { text } => {
             let _ = write!(
                 out,
                 r#"<p style="margin:0 0 18px;font-size:14.5px;line-height:1.65;color:{body};font-family:{FONT_SANS};">{}</p>"#,
-                esc(p),
+                esc(text),
                 body = theme.text_body,
             );
         }
@@ -187,7 +187,7 @@ fn render_group(g: &GroupCard, theme: &Theme, out: &mut String) {
     }
 
     match &g.body {
-        GroupBody::Fields(fields) => {
+        GroupBody::Fields { fields } => {
             out.push_str(
                 r#"<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">"#,
             );
@@ -196,7 +196,7 @@ fn render_group(g: &GroupCard, theme: &Theme, out: &mut String) {
             }
             out.push_str("</table>");
         }
-        GroupBody::Records(records) => {
+        GroupBody::Records { records } => {
             for r in records {
                 render_record_card(r, theme, out);
             }

@@ -104,9 +104,21 @@ pub enum Block {
     /// + optional tinted how-to footer.
     Group(GroupCard),
     /// Mid-body section heading (h2-equivalent).
-    SectionHeading(String),
-    /// Plain prose paragraph.
-    Paragraph(String),
+    ///
+    /// Struct variant rather than tuple newtype because serde's
+    /// `tag = "kind"` adjacency requires struct/map shapes — tuple
+    /// newtypes holding plain strings refuse to serialize with an
+    /// internal tag.
+    SectionHeading {
+        /// Heading text.
+        text: String,
+    },
+    /// Plain prose paragraph. See [`Block::SectionHeading`] for the
+    /// reason this is a struct variant rather than `Paragraph(String)`.
+    Paragraph {
+        /// Paragraph body.
+        text: String,
+    },
     /// Monospaced code/command block. Each entry is one line.
     Code(CodeBlock),
     /// Call-to-action button. Renders as a styled link with a
@@ -136,17 +148,27 @@ pub struct GroupCard {
 }
 
 /// Body shape of a [`GroupCard`].
+///
+/// Struct variants rather than tuple newtypes for the same serde
+/// reason as [`Block::Paragraph`] — `tag = "kind"` adjacency
+/// requires struct/map shapes for round-trip JSON.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum GroupBody {
     /// Flat label/value table — used for sender summaries, settings
     /// dumps, etc.
-    Fields(Vec<Field>),
+    Fields {
+        /// Field rows.
+        fields: Vec<Field>,
+    },
     /// Nested record cards — each record gets its own bordered
     /// panel for maximum visual separation. Use this when each row
     /// is meaningful in isolation (DNS records, audit-log entries,
     /// user accounts).
-    Records(Vec<RecordCard>),
+    Records {
+        /// Records, in order.
+        records: Vec<RecordCard>,
+    },
 }
 
 /// One row inside a [`GroupCard::body`] = `Fields`. The HTML renderer
@@ -218,7 +240,7 @@ mod tests {
                     eyebrow: "Group A".into(),
                     title: "First group".into(),
                     subtitle: Some("With a subtitle.".into()),
-                    body: GroupBody::Fields(vec![
+                    body: GroupBody::Fields { fields: vec![
                         Field {
                             label: "Host".into(),
                             value: "outreach".into(),
@@ -229,14 +251,14 @@ mod tests {
                             value: "TXT".into(),
                             mono: true,
                         },
-                    ]),
+                    ] },
                     how_to: Some("After publishing, run <code>dig +short</code>.".into()),
                 }),
                 Block::Group(GroupCard {
                     eyebrow: "Group B".into(),
                     title: "Records — nested".into(),
                     subtitle: None,
-                    body: GroupBody::Records(vec![
+                    body: GroupBody::Records { records: vec![
                         RecordCard {
                             eyebrow: "Record 1 of 2".into(),
                             primary_label: "outreach".into(),
@@ -251,10 +273,12 @@ mod tests {
                             value: "v=DKIM1; ...".into(),
                             note: Some("One continuous string — do not split.".into()),
                         },
-                    ]),
+                    ] },
                     how_to: None,
                 }),
-                Block::SectionHeading("Verification".into()),
+                Block::SectionHeading {
+                    text: "Verification".into(),
+                },
                 Block::Code(CodeBlock {
                     eyebrow: None,
                     lines: vec!["dig +short A example.com".into()],
