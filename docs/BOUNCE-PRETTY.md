@@ -34,6 +34,28 @@ sudo install -o root -g root -m 0755 \
 
 ## Postfix wiring
 
+> **Status as of 2026-05-01**: the pipe transport, header_checks file, and
+> `cleanup_no_filter` master.cf entries are staged on web-01 but the live
+> `header_checks` parameter is unset because we ran into a recursion
+> loop — the standard `cleanup_no_filter` bypass pattern with
+> `sendmail -O cleanup_service_name=cleanup_no_filter` did not actually
+> route the re-injection through the no-filter cleanup, so the rewritten
+> message hit `header_checks` again and triggered the FILTER a second
+> time. Postfix's `hopcount_limit` saved us, but it's not a workable
+> production state.
+>
+> Follow-up paths to investigate:
+> - Wrap re-injection via `postdrop` instead of `sendmail` so cleanup
+>   uses a different submission path.
+> - Pipe transport `flags=` overrides — `flags=DRho` may behave
+>   differently re: cleanup routing.
+> - Switch from FILTER to a milter-based approach (`bounce-pretty` would
+>   become a daemon listening on a Unix socket and rewrite via the
+>   milter EOM callback). The non_smtpd_milters config slot already
+>   exists for OpenDKIM.
+> - Replace Postfix's `bounce` master.cf entry entirely with a custom
+>   bounce daemon that emits the polished HTML directly.
+
 ### 1. Add a pipe transport in `master.cf`
 
 ```
