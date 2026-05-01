@@ -1,0 +1,25 @@
+[package]
+name = "mail-calendar"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Typed calendar items extracted from email — events, todos, alarms. Parses RFC 5545 (iCalendar) attachments, exposes a typed CalendarItem enum that mail clients (Thundercrab, etc.) publish via CalDAV / Google Calendar / Microsoft Graph / Apple iCloud."
+
+[dependencies]
+chrono.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "deny"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate = "allow"

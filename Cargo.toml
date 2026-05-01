@@ -4,13 +4,14 @@ members = [
     "mail-orchestrator",
     "mail-config",
     "mail-cli",
+    "mail-calendar",
 ]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/redcaptian1917/Secure-Email-Server-and-UI"
+repository = "https://github.com/thepictishbeast/Mailroom"
 
 [workspace.dependencies]
 # Async runtime
