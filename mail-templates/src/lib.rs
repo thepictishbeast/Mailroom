@@ -41,6 +41,8 @@ mod render_html;
 mod render_plain;
 mod tokens;
 
+pub use tokens::Theme;
+
 pub mod prebuilt;
 
 use serde::{Deserialize, Serialize};
@@ -68,11 +70,20 @@ pub struct EmailDocument {
 }
 
 impl EmailDocument {
-    /// Render to a complete HTML body. Includes the `<!DOCTYPE>`,
+    /// Render to a complete HTML body using the default
+    /// [`Theme::plausiden`] palette. Includes the `<!DOCTYPE>`,
     /// `<html>`, `<head>`, and `<body>` wrappers.
     #[must_use]
     pub fn render_html(&self) -> String {
-        render_html::render(self)
+        render_html::render(self, &Theme::plausiden())
+    }
+
+    /// Render to HTML with an explicit theme — the multi-tenant
+    /// path. Use [`Theme::sacredvote`] (or a custom-built `Theme`)
+    /// to render the same AST with a different brand chrome.
+    #[must_use]
+    pub fn render_html_with_theme(&self, theme: &Theme) -> String {
+        render_html::render(self, theme)
     }
 
     /// Render to a `text/plain` alternative. Wraps lines at 78 cols
@@ -321,5 +332,38 @@ mod tests {
         let h = sample_doc().render_html();
         assert!(h.contains("View dashboard"));
         assert!(h.contains("href=\"https://example.com/dashboard\""));
+    }
+
+    #[test]
+    fn default_html_uses_plausiden_chrome() {
+        let h = sample_doc().render_html();
+        assert!(h.contains("PlausiDen"));
+        assert!(h.contains("Plausible. Defensible."));
+        assert!(h.contains("plausiden.com"));
+        assert!(h.contains("team@plausiden.com"));
+    }
+
+    #[test]
+    fn explicit_theme_renders_alternate_chrome() {
+        let h = sample_doc().render_html_with_theme(&Theme::sacredvote());
+        // SacredVote chrome instead of PlausiDen
+        assert!(h.contains("SacredVote"));
+        assert!(h.contains("Defending the ballot."));
+        assert!(h.contains("sacred.vote"));
+        // Should NOT contain PlausiDen footer
+        assert!(!h.contains("PlausiDen LLC"));
+    }
+
+    #[test]
+    fn custom_theme_propagates_brand_color() {
+        let mut t = Theme::plausiden();
+        t.brand_primary = "#ff00aa".into();
+        let h = sample_doc().render_html_with_theme(&t);
+        // Color shows up at multiple touch points (pill, button, links).
+        assert!(
+            h.matches("#ff00aa").count() >= 3,
+            "expected brand_primary in multiple places, got {} occurrences",
+            h.matches("#ff00aa").count()
+        );
     }
 }
