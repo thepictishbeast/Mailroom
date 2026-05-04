@@ -126,6 +126,7 @@ impl Default for CategoryRules {
                 rule_important_billing_critical(),
                 rule_receipts(),
                 rule_travel(),
+                rule_banking(),
                 rule_important(),
                 rule_promotions_listunsub(),
                 rule_promotions_senders(),
@@ -473,6 +474,80 @@ fn rule_2fa_inbox() -> CategoryRule {
         // so we want them at the top of INBOX regardless of bulk-mail
         // markers.
         score: 95,
+        stop_on_match: true,
+    }
+}
+
+/// Banking → Banking folder. Bank statements, credit-card alerts,
+/// brokerage notices, retirement-account statements. These are
+/// reference material reviewed monthly (statements) or at tax time
+/// (1099s, donation receipts), and they're worth pulling out of the
+/// generic Updates bucket where they currently go via the
+/// updates_senders domain list.
+///
+/// Score 86 (same band as travel): below receipts (87, "your
+/// receipt from Chase" → financial record first) and below
+/// important_billing_critical (89, "card declined" → page).
+///
+/// IMPORTANT: bank security alerts ("new sign-in detected") still
+/// route to Important via important_security (92), since "did
+/// someone log into my bank account?" is page-worthy.
+fn rule_banking() -> CategoryRule {
+    CategoryRule {
+        id: "banking".into(),
+        display_name: "Banking — bank / credit card / brokerage senders".into(),
+        when: MatchExpr::FromDomainIn {
+            domains: vec![
+                // Major US retail banks.
+                "@chase.com".into(),
+                "@bankofamerica.com".into(),
+                "@wellsfargo.com".into(),
+                "@citi.com".into(),
+                "@citibank.com".into(),
+                "@usbank.com".into(),
+                "@pnc.com".into(),
+                "@truist.com".into(),
+                "@capitalone.com".into(),
+                "@allyinvest.com".into(),
+                "@ally.com".into(),
+                "@discover.com".into(),
+                "@hsbc.com".into(),
+                "@tdbank.com".into(),
+                // Credit-card issuers (often distinct from the parent bank).
+                "@americanexpress.com".into(),
+                "@amex.com".into(),
+                "@citicards.com".into(),
+                "@chase.email.chase.com".into(),
+                // Brokerage / investment.
+                "@schwab.com".into(),
+                "@fidelity.com".into(),
+                "@vanguard.com".into(),
+                "@etrade.com".into(),
+                "@tdameritrade.com".into(),
+                "@robinhood.com".into(),
+                "@coinbase.com".into(),
+                // Tax / accounting.
+                "@intuit.com".into(),
+                "@turbotax.com".into(),
+                "@quickbooks.com".into(),
+                "@hrblock.com".into(),
+                // Money-movement services.
+                "@venmo.com".into(),
+                "@zelle.com".into(),
+                "@wise.com".into(),
+                "@transferwise.com".into(),
+                "@cash.app".into(),
+                "@squareup.com".into(),
+            ],
+        },
+        action: Action::FileInto {
+            folder: "Banking".into(),
+        },
+        // 86 mirrors travel — both are reference-document senders.
+        // receipts (87) wins for "your receipt" subjects so that a
+        // Chase/Stripe/etc. monthly receipt files as a receipt;
+        // banking gets the rest (statements, alerts, notices).
+        score: 86,
         stop_on_match: true,
     }
 }
@@ -1122,16 +1197,12 @@ fn rule_updates_senders() -> CategoryRule {
                 "@namesilo.com".into(),
                 "@godaddy.com".into(),
                 "@networksolutions.com".into(),
-                // Payment / commerce.
+                // Payment / commerce. (Banking-specific senders moved to
+                // the dedicated banking rule at score 86 so they file
+                // into Banking instead of Updates.)
                 "@stripe.com".into(),
                 "@paypal.com".into(),
-                "@venmo.com".into(),
-                "@zelle.com".into(),
-                "@intuit.com".into(),
                 "@shopify.com".into(),
-                // Banking — transactional alerts.
-                "@chase.com".into(),
-                "@bankofamerica.com".into(),
                 // On-demand services with order/receipt confirmations.
                 "@doordash.com".into(),
                 "@uber.com".into(),
@@ -1426,6 +1497,61 @@ mod tests {
         let h = vec![];
         let hits = rules.evaluate(&ctx(&h, "dse@docusign.net", "Please sign: Master Services Agreement"));
         assert_eq!(hits.first().unwrap().id, "important_signature");
+    }
+
+    #[test]
+    fn chase_statement_routes_to_banking() {
+        let rules = CategoryRules::default();
+        let h = vec![];
+        let hits = rules.evaluate(&ctx(&h, "alerts@chase.com", "Your December statement is ready"));
+        assert_eq!(hits.first().unwrap().id, "banking");
+    }
+
+    #[test]
+    fn fidelity_brokerage_alert_routes_to_banking() {
+        let rules = CategoryRules::default();
+        let h = vec![];
+        let hits = rules.evaluate(&ctx(&h, "no-reply@fidelity.com", "Trade confirmation"));
+        assert_eq!(hits.first().unwrap().id, "banking");
+    }
+
+    #[test]
+    fn amex_charge_alert_routes_to_banking() {
+        let rules = CategoryRules::default();
+        let h = vec![];
+        let hits = rules.evaluate(&ctx(&h, "alerts@americanexpress.com", "Large purchase notification"));
+        assert_eq!(hits.first().unwrap().id, "banking");
+    }
+
+    #[test]
+    fn bank_security_alert_still_pages_to_important() {
+        // important_security (92) > banking (86): "new sign-in to your
+        // bank account" must page, not be filed quietly into Banking.
+        let rules = CategoryRules::default();
+        let h = vec![];
+        let hits = rules.evaluate(&ctx(&h, "alerts@chase.com", "New sign-in detected on your Chase account"));
+        assert_eq!(hits.first().unwrap().id, "important_security");
+    }
+
+    #[test]
+    fn bank_card_declined_still_pages_to_important() {
+        // important_billing_critical (89) > banking (86): "card
+        // declined" must page.
+        let rules = CategoryRules::default();
+        let h = vec![];
+        let hits = rules.evaluate(&ctx(&h, "alerts@chase.com", "Action required: card declined"));
+        assert_eq!(hits.first().unwrap().id, "important_billing_critical");
+    }
+
+    #[test]
+    fn bank_receipt_routes_to_receipts_not_banking() {
+        // receipts (87) > banking (86): "your receipt" wins because
+        // it's a financial-record axis. Both are reasonable; receipts
+        // is the more specific signal.
+        let rules = CategoryRules::default();
+        let h = vec![];
+        let hits = rules.evaluate(&ctx(&h, "no-reply@chase.com", "Your receipt for the $50 transfer"));
+        assert_eq!(hits.first().unwrap().id, "receipts");
     }
 
     #[test]
