@@ -554,6 +554,124 @@ pub fn inquiry_received(
     }
 }
 
+/// Status of a tracked shipment. Maps to the eyebrow + heading
+/// tone in the rendered email so the recipient triages at a glance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShipmentStatus {
+    /// Carrier received the package; en route.
+    InTransit,
+    /// Out for delivery today.
+    OutForDelivery,
+    /// Delivered.
+    Delivered,
+    /// Delivery exception — held, returned, address issue.
+    Exception,
+}
+
+impl ShipmentStatus {
+    fn eyebrow(self) -> &'static str {
+        match self {
+            Self::InTransit => "In transit",
+            Self::OutForDelivery => "Out for delivery",
+            Self::Delivered => "Delivered",
+            Self::Exception => "Exception · action needed",
+        }
+    }
+}
+
+/// Build a polished shipping-status email (carrier tracking update).
+///
+/// Distinct from [`prebuilt::feedback_received`] / [`bounce`] — this
+/// is for the "your package is out for delivery"-shaped notifications
+/// from carriers / e-commerce platforms.
+///
+/// `carrier` is the human-readable shipper ("UPS", "FedEx", "USPS",
+/// "DHL"); `tracking_number` is the carrier's reference; `status`
+/// drives the eyebrow + heading tone; `expected_delivery` is a
+/// pre-formatted date string (caller's call on locale); `tracking_url`
+/// is optional — if present, a CTA button links straight to the
+/// carrier's tracking page.
+#[must_use]
+pub fn shipping_notification(
+    carrier: &str,
+    tracking_number: &str,
+    status: ShipmentStatus,
+    expected_delivery: Option<&str>,
+    tracking_url: Option<&str>,
+) -> EmailDocument {
+    let heading = match status {
+        ShipmentStatus::InTransit => format!("Your {carrier} package is on the way"),
+        ShipmentStatus::OutForDelivery => format!("Your {carrier} package is out for delivery"),
+        ShipmentStatus::Delivered => format!("Your {carrier} package has been delivered"),
+        ShipmentStatus::Exception => format!("There's an issue with your {carrier} shipment"),
+    };
+
+    let mut fields = vec![
+        Field {
+            label: "Carrier".into(),
+            value: carrier.into(),
+            mono: false,
+        },
+        Field {
+            label: "Tracking #".into(),
+            value: tracking_number.into(),
+            mono: true,
+        },
+        Field {
+            label: "Status".into(),
+            value: status.eyebrow().into(),
+            mono: false,
+        },
+    ];
+    if let Some(eta) = expected_delivery {
+        fields.push(Field {
+            label: "Expected".into(),
+            value: eta.into(),
+            mono: false,
+        });
+    }
+
+    let mut blocks: Vec<Block> = vec![Block::Group(GroupCard {
+        eyebrow: "Shipment".into(),
+        title: "At a glance".into(),
+        subtitle: None,
+        body: GroupBody::Fields { fields },
+        how_to: None,
+    })];
+
+    if let Some(url) = tracking_url {
+        blocks.push(Block::Cta(Cta {
+            label: "Track shipment →".into(),
+            href: url.into(),
+        }));
+    }
+
+    if matches!(status, ShipmentStatus::Exception) {
+        blocks.push(Block::Paragraph {
+            text: "The carrier flagged this shipment with a delivery \
+                   exception. Common causes: address validation failure, \
+                   recipient not available, customs hold, weather delay. \
+                   Open the tracking page above for the carrier's full \
+                   diagnostic + your action options."
+                .into(),
+        });
+    }
+
+    EmailDocument {
+        subject: format!("[{carrier}] {heading}"),
+        preheader: format!(
+            "{} · tracking {}",
+            status.eyebrow(),
+            tracking_number
+        ),
+        eyebrow: Some(status.eyebrow().into()),
+        heading,
+        intro: None,
+        blocks,
+        footer_lines: vec![],
+    }
+}
+
 /// Build a password-reset email — a one-tap link to a form where
 /// the user picks a new password.
 ///
@@ -766,6 +884,53 @@ mod tests {
         let html = doc.render_html();
         // Once in the CTA href, once in the fallback Field
         assert!(html.matches(url).count() >= 2);
+    }
+
+    #[test]
+    fn shipping_out_for_delivery_renders_carrier_and_tracking() {
+        let doc = shipping_notification(
+            "UPS",
+            "1Z9999W99999999999",
+            ShipmentStatus::OutForDelivery,
+            Some("Today by 8 PM"),
+            Some("https://wwwapps.ups.com/tracking/tracking.cgi?tracknum=1Z..."),
+        );
+        let html = doc.render_html();
+        assert_eq!(doc.subject, "[UPS] Your UPS package is out for delivery");
+        assert!(html.contains("Out for delivery"));
+        assert!(html.contains("1Z9999W99999999999"));
+        assert!(html.contains("Today by 8 PM"));
+        assert!(html.contains("Track shipment"));
+    }
+
+    #[test]
+    fn shipping_exception_includes_diagnostic_paragraph() {
+        let doc = shipping_notification(
+            "FedEx",
+            "FX12345",
+            ShipmentStatus::Exception,
+            None,
+            None,
+        );
+        let html = doc.render_html();
+        assert!(html.contains("Exception · action needed"));
+        assert!(html.contains("delivery exception"));
+        // No CTA when no URL
+        assert!(!html.contains("Track shipment"));
+    }
+
+    #[test]
+    fn shipping_delivered_omits_eta_when_not_provided() {
+        let doc = shipping_notification(
+            "USPS",
+            "9405...",
+            ShipmentStatus::Delivered,
+            None,
+            None,
+        );
+        let html = doc.render_html();
+        assert!(html.contains("Delivered"));
+        assert!(!html.contains("Expected"));
     }
 
     #[test]
