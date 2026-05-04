@@ -124,6 +124,7 @@ impl Default for CategoryRules {
                 rule_important_security(),
                 rule_important_signature(),
                 rule_important_billing_critical(),
+                rule_receipts(),
                 rule_important(),
                 rule_promotions_listunsub(),
                 rule_promotions_senders(),
@@ -471,6 +472,66 @@ fn rule_2fa_inbox() -> CategoryRule {
         // so we want them at the top of INBOX regardless of bulk-mail
         // markers.
         score: 95,
+        stop_on_match: true,
+    }
+}
+
+/// Receipts → Receipts folder. Transactional payment confirmations
+/// (Stripe charges, PayPal receipts, bank notifications, on-demand
+/// service receipts). These are valuable to keep but they swamp the
+/// Updates folder when they're mixed with operational alerts.
+///
+/// Score 87 sits BETWEEN important_billing_critical (89, "payment
+/// FAILED" → still Important) and updates_senders (85, generic
+/// transactional). So:
+///   - "Payment received from Stripe" → Receipts (matches here)
+///   - "Payment FAILED at Stripe"     → Important (89 wins, paged)
+///   - "GitHub PR opened"             → Updates (85, no receipt match)
+fn rule_receipts() -> CategoryRule {
+    CategoryRule {
+        id: "receipts".into(),
+        display_name: "Receipts — payment confirmations + order receipts".into(),
+        when: MatchExpr::SubjectContainsAny {
+            needles: vec![
+                // Payment receipts.
+                "your receipt".into(),
+                "payment received".into(),
+                "payment from".into(),
+                "you paid".into(),
+                "you've been paid".into(),
+                "thanks for your payment".into(),
+                "thank you for your payment".into(),
+                "we received your payment".into(),
+                "payment confirmed".into(),
+                "payment successful".into(),
+                // Order / shipping receipts.
+                "your order".into(),
+                "order received".into(),
+                "order confirmed".into(),
+                "order confirmation".into(),
+                "thanks for your order".into(),
+                "thank you for your order".into(),
+                "shipped".into(),
+                "delivery confirmation".into(),
+                // Subscription / renewal receipts (success only — failures
+                // hit important_billing_critical at score 89).
+                "subscription renewed".into(),
+                "renewal confirmation".into(),
+                "your invoice".into(),
+                "invoice receipt".into(),
+                "donation receipt".into(),
+                // Generic transactional receipts.
+                "receipt for".into(),
+            ],
+        },
+        action: Action::FileInto {
+            folder: "Receipts".into(),
+        },
+        // 87: above updates_senders (85) so Stripe/PayPal/etc. transactional
+        // mail with receipt-shaped subjects routes here, but below
+        // important_billing_critical (89) so payment-FAILURE alerts still
+        // page to Important.
+        score: 87,
         stop_on_match: true,
     }
 }
@@ -1112,12 +1173,16 @@ mod tests {
 
     /// Stripe receipts are the same shape — transactional, with
     /// List-Unsubscribe — and must stay in Updates.
+    /// Stripe receipts WERE routed to updates_senders (85) before the
+    /// receipts rule (87) shipped. Now they go to Receipts. Promoted-
+    /// regression guard: still must NOT hit promotions_listunsub even
+    /// though they carry List-Unsubscribe.
     #[test]
-    fn stripe_receipt_with_list_unsubscribe_routes_to_updates() {
+    fn stripe_receipt_with_list_unsubscribe_routes_to_receipts() {
         let rules = CategoryRules::default();
         let h = vec![("list-unsubscribe".into(), "<mailto:unsub@stripe.com>".into())];
         let hits = rules.evaluate(&ctx(&h, "receipts@stripe.com", "Your receipt from Stripe"));
-        assert_eq!(hits.first().unwrap().id, "updates_senders");
+        assert_eq!(hits.first().unwrap().id, "receipts");
     }
 
     /// Facebook + Instagram notifications carry List-Unsubscribe but
@@ -1201,11 +1266,18 @@ mod tests {
 
     #[test]
     fn list_unsubscribe_overrides_subject_keywords() {
-        // Mailchimp "your order" promo — List-Unsubscribe wins over subject
-        // keywords because score 80 > 50.
+        // Mailchimp "your order" promo. Order: receipts (87) > listunsub
+        // (80) > subject_keywords (50). The receipts rule wins now that
+        // it ships — these mailings DO look like receipts. Promotions-
+        // shaped marketing without "order" / "receipt" subject still
+        // hits promotions_listunsub.
         let rules = CategoryRules::default();
         let h = vec![("list-unsubscribe".into(), "<mailto:u@x>".into())];
         let hits = rules.evaluate(&ctx(&h, "noreply@mailchimp.com", "Your order is confirmed"));
+        assert_eq!(hits.first().unwrap().id, "receipts");
+
+        // Pure-promo subject still routes via list-unsubscribe.
+        let hits = rules.evaluate(&ctx(&h, "noreply@mailchimp.com", "50% off this weekend!"));
         assert_eq!(hits.first().unwrap().id, "promotions_listunsub");
     }
 
@@ -1260,6 +1332,63 @@ mod tests {
     }
 
     #[test]
+    fn stripe_receipt_routes_to_receipts_folder() {
+        let rules = CategoryRules::default();
+        let h = vec![("list-unsubscribe".into(), "<mailto:u@stripe.com>".into())];
+        let hits = rules.evaluate(&ctx(&h, "receipts@stripe.com", "Your receipt from Stripe — $14.00"));
+        let first = hits.first().expect("a rule fires");
+        assert_eq!(first.id, "receipts", "Stripe receipt should hit receipts rule first");
+        assert_eq!(
+            first.action,
+            Action::FileInto {
+                folder: "Receipts".into()
+            }
+        );
+    }
+
+    #[test]
+    fn paypal_payment_received_routes_to_receipts() {
+        let rules = CategoryRules::default();
+        let h = vec![];
+        let hits = rules.evaluate(&ctx(&h, "service@paypal.com", "You've been paid $50.00"));
+        assert_eq!(hits.first().unwrap().id, "receipts");
+    }
+
+    #[test]
+    fn order_confirmation_routes_to_receipts_not_updates() {
+        // "Your order" matched the existing updates_subject_keywords rule
+        // at score 50; the new receipts rule at 87 should win.
+        let rules = CategoryRules::default();
+        let h = vec![];
+        let hits = rules.evaluate(&ctx(&h, "orders@shopify.com", "Your order has shipped"));
+        let first = hits.first().expect("a rule fires");
+        assert_eq!(first.id, "receipts", "order confirmations belong in Receipts");
+    }
+
+    #[test]
+    fn payment_failure_still_routes_to_important_not_receipts() {
+        // Score-ordering regression guard: payment-failure copy must beat
+        // the receipts rule (87) and hit important_billing_critical (89).
+        let rules = CategoryRules::default();
+        let h = vec![];
+        let hits = rules.evaluate(&ctx(&h, "billing@stripe.com", "Action required: payment failed"));
+        let first = hits.first().expect("a rule fires");
+        assert_eq!(
+            first.id, "important_billing_critical",
+            "payment FAILURE must page to Important, not file as a receipt"
+        );
+    }
+
+    #[test]
+    fn generic_github_notification_does_not_hit_receipts() {
+        // A non-receipt GitHub email should still go to Updates.
+        let rules = CategoryRules::default();
+        let h = vec![];
+        let hits = rules.evaluate(&ctx(&h, "noreply@github.com", "[repo] PR opened: fix bug"));
+        assert_eq!(hits.first().unwrap().id, "updates_senders");
+    }
+
+    #[test]
     fn billing_failure_routes_to_important() {
         let rules = CategoryRules::default();
         let h = vec![];
@@ -1269,12 +1398,17 @@ mod tests {
     }
 
     #[test]
-    fn ordinary_stripe_receipt_still_routes_to_updates() {
-        // Receipts must NOT trigger important_billing_critical.
+    fn ordinary_stripe_receipt_routes_to_receipts() {
+        // After the receipts rule shipped, "your receipt" subjects route
+        // to Receipts (score 87) rather than updates_senders (85). They
+        // must still NOT trigger important_billing_critical (89; needs
+        // failure-shaped subject).
         let rules = CategoryRules::default();
         let h = vec![("list-unsubscribe".into(), "<mailto:u@stripe.com>".into())];
         let hits = rules.evaluate(&ctx(&h, "receipts@stripe.com", "Your receipt from Stripe — $14.00"));
-        assert_eq!(hits.first().unwrap().id, "updates_senders");
+        let first = hits.first().unwrap();
+        assert_eq!(first.id, "receipts");
+        assert_ne!(first.id, "important_billing_critical");
     }
 
     #[test]
