@@ -554,6 +554,111 @@ pub fn inquiry_received(
     }
 }
 
+/// Build a password-reset email — a one-tap link to a form where
+/// the user picks a new password.
+///
+/// `expires_in_minutes` becomes "valid for X minutes" copy in the
+/// body. 15 minutes is a sensible default for security-sensitive
+/// flows; longer if the recipient's mail provider routinely lags.
+#[must_use]
+pub fn password_reset(reset_link: &str, expires_in_minutes: u32) -> EmailDocument {
+    let blocks = vec![
+        Block::Paragraph {
+            text: format!(
+                "Someone (probably you) asked to reset your password. Click \
+                 the button below within {expires_in_minutes} minutes to \
+                 pick a new one. The link is single-use — once used, it \
+                 can't be used again."
+            ),
+        },
+        Block::Cta(Cta {
+            label: "Reset password →".into(),
+            href: reset_link.into(),
+        }),
+        Block::Group(GroupCard {
+            eyebrow: "Fallback".into(),
+            title: "If the button doesn't work".into(),
+            subtitle: Some("Paste this URL directly into your browser.".into()),
+            body: GroupBody::Fields {
+                fields: vec![Field {
+                    label: "URL".into(),
+                    value: reset_link.into(),
+                    mono: true,
+                }],
+            },
+            how_to: None,
+        }),
+        Block::Paragraph {
+            text: "Didn't request this? Someone may have typed your email \
+                   address by mistake — you can ignore this message and \
+                   nothing will change. If reset requests keep arriving, \
+                   reply to this thread and we'll look into it."
+                .into(),
+        },
+    ];
+
+    EmailDocument {
+        subject: "Reset your PlausiDen password".into(),
+        preheader: format!("Single-use reset link, valid for {expires_in_minutes} minutes."),
+        eyebrow: Some("Password reset".into()),
+        heading: "Reset your password".into(),
+        intro: None,
+        blocks,
+        footer_lines: vec![],
+    }
+}
+
+/// Build an email-verification email for new sign-ups — confirms
+/// the recipient owns the address before activating the account.
+///
+/// `verify_link` is the one-time URL the user clicks; `expires_in_hours`
+/// is the validity window (24 hours is typical for sign-ups since
+/// recipients may not check mail same-day).
+#[must_use]
+pub fn email_verification(verify_link: &str, expires_in_hours: u32) -> EmailDocument {
+    let blocks = vec![
+        Block::Paragraph {
+            text: format!(
+                "Welcome. Confirm this email address belongs to you so we \
+                 can finish setting up your account. The link below is \
+                 valid for {expires_in_hours} hours and works once."
+            ),
+        },
+        Block::Cta(Cta {
+            label: "Verify email →".into(),
+            href: verify_link.into(),
+        }),
+        Block::Group(GroupCard {
+            eyebrow: "Fallback".into(),
+            title: "If the button doesn't work".into(),
+            subtitle: Some("Paste this URL directly into your browser.".into()),
+            body: GroupBody::Fields {
+                fields: vec![Field {
+                    label: "URL".into(),
+                    value: verify_link.into(),
+                    mono: true,
+                }],
+            },
+            how_to: None,
+        }),
+        Block::Paragraph {
+            text: "Didn't sign up? Ignore this email — without confirmation, \
+                   no account is activated."
+                .into(),
+        },
+    ];
+
+    EmailDocument {
+        subject: "Confirm your email — PlausiDen".into(),
+        preheader: format!("Verify your address; link valid for {expires_in_hours} hours."),
+        eyebrow: Some("Email verification".into()),
+        heading: "Confirm your email address".into(),
+        intro: None,
+        blocks,
+        footer_lines: vec![],
+    }
+}
+
 /// Build the "Sign in to PlausiDen admin" magic-link email.
 #[must_use]
 pub fn magic_link(link: &str) -> EmailDocument {
@@ -661,6 +766,39 @@ mod tests {
         let html = doc.render_html();
         // Once in the CTA href, once in the fallback Field
         assert!(html.matches(url).count() >= 2);
+    }
+
+    #[test]
+    fn password_reset_renders_link_and_expiry_copy() {
+        let url = "https://plausiden.com/reset?t=abc";
+        let doc = password_reset(url, 15);
+        let html = doc.render_html();
+        assert_eq!(doc.subject, "Reset your PlausiDen password");
+        // Expiry minutes appear in body
+        assert!(html.contains("15 minutes"));
+        // Link in CTA + fallback (so at least 2 occurrences)
+        assert!(html.matches(url).count() >= 2);
+    }
+
+    #[test]
+    fn password_reset_escapes_pathological_url() {
+        let url = "https://x.com/?<script>";
+        let doc = password_reset(url, 15);
+        let html = doc.render_html();
+        assert!(!html.contains("?<script>"));
+        assert!(html.contains("&lt;script&gt;"));
+    }
+
+    #[test]
+    fn email_verification_uses_hours_window() {
+        let url = "https://plausiden.com/verify?t=xyz";
+        let doc = email_verification(url, 24);
+        assert_eq!(doc.subject, "Confirm your email — PlausiDen");
+        let html = doc.render_html();
+        assert!(html.contains("24 hours"));
+        assert!(html.matches(url).count() >= 2);
+        // Eyebrow + heading
+        assert!(html.contains("Email verification"));
     }
 
     #[test]
