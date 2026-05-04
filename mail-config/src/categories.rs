@@ -5,8 +5,8 @@
 //! same `CategoryRule` is:
 //!   1. Evaluated server-side (compiled to Sieve and run by Pigeonhole at
 //!      LMTP delivery).
-//!   2. Evaluated client-side (Thundercrab runs [`Self::evaluate`] over
-//!      cached message headers when sorting offline).
+//!   2. Evaluated client-side (Thundercrab runs [`CategoryRules::evaluate`]
+//!      over cached message headers when sorting offline).
 //!   3. Round-tripped through ManageSieve and the federated suggestion
 //!      ledger.
 //!

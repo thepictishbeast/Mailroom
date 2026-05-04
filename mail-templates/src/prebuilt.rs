@@ -581,7 +581,7 @@ impl ShipmentStatus {
 
 /// Build a polished shipping-status email (carrier tracking update).
 ///
-/// Distinct from [`prebuilt::feedback_received`] / [`bounce`] — this
+/// Distinct from [`feedback_received`] / [`bounce`] — this
 /// is for the "your package is out for delivery"-shaped notifications
 /// from carriers / e-commerce platforms.
 ///

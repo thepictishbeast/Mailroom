@@ -102,7 +102,7 @@ pub fn parse_email(path: &Path) -> Result<ParsedEmail> {
     })
 }
 
-/// Extract just the email address from a "Name <addr>" string.
+/// Extract just the email address from a `Name <addr>` string.
 pub fn extract_address(addr_str: &str) -> &str {
     if let Some(start) = addr_str.find('<') {
         if let Some(end) = addr_str.find('>') {
