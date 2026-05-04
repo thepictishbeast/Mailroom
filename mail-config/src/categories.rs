@@ -125,6 +125,7 @@ impl Default for CategoryRules {
                 rule_important_signature(),
                 rule_important_billing_critical(),
                 rule_receipts(),
+                rule_travel(),
                 rule_important(),
                 rule_promotions_listunsub(),
                 rule_promotions_senders(),
@@ -472,6 +473,102 @@ fn rule_2fa_inbox() -> CategoryRule {
         // so we want them at the top of INBOX regardless of bulk-mail
         // markers.
         score: 95,
+        stop_on_match: true,
+    }
+}
+
+/// Travel → Travel folder. Airline / hotel / rental-car / travel-
+/// agency mail. These are reference documents (boarding passes,
+/// reservation confirmations) the recipient typically wants
+/// findable as a group, not interleaved with GitHub PRs and Stripe
+/// receipts in a generic Updates bucket.
+///
+/// Score 86 sits between receipts (87) and updates_senders (85).
+/// So a "Your receipt from United" matches receipts first (87),
+/// while a "Your flight to LAX on May 12" hits travel (86) — both
+/// are sensible because the receipts rule is for the financial
+/// record, the travel rule is for the itinerary.
+///
+/// IMPORTANT-class travel mail (cancellation, schedule change,
+/// "action required") still beats this via important_billing_critical
+/// (89, "action required" pattern) — flight delays and cancellations
+/// are time-sensitive enough to warrant pager-level routing.
+fn rule_travel() -> CategoryRule {
+    CategoryRule {
+        id: "travel".into(),
+        display_name: "Travel — airline / hotel / rental car / travel agency senders".into(),
+        when: MatchExpr::FromDomainIn {
+            domains: vec![
+                // US major + low-cost airlines.
+                "@united.com".into(),
+                "@aa.com".into(),
+                "@delta.com".into(),
+                "@southwest.com".into(),
+                "@jetblue.com".into(),
+                "@alaskaair.com".into(),
+                "@spirit.com".into(),
+                "@frontierairlines.com".into(),
+                "@hawaiianair.com".into(),
+                // International majors that route US-based travelers.
+                "@britishairways.com".into(),
+                "@aircanada.ca".into(),
+                "@aircanada.com".into(),
+                "@lufthansa.com".into(),
+                "@airfrance.com".into(),
+                "@klm.com".into(),
+                "@emirates.com".into(),
+                "@qatarairways.com".into(),
+                "@singaporeair.com".into(),
+                "@cathaypacific.com".into(),
+                "@ana.co.jp".into(),
+                "@jal.com".into(),
+                // Hotels.
+                "@marriott.com".into(),
+                "@hilton.com".into(),
+                "@hyatt.com".into(),
+                "@ihg.com".into(),
+                "@accorhotels.com".into(),
+                "@choicehotels.com".into(),
+                "@bestwestern.com".into(),
+                "@wyndhamhotels.com".into(),
+                "@radisson.com".into(),
+                // Booking platforms.
+                "@booking.com".into(),
+                "@expedia.com".into(),
+                "@hotels.com".into(),
+                "@kayak.com".into(),
+                "@priceline.com".into(),
+                "@orbitz.com".into(),
+                "@travelocity.com".into(),
+                "@tripadvisor.com".into(),
+                "@trivago.com".into(),
+                "@agoda.com".into(),
+                "@airbnb.com".into(),
+                "@vrbo.com".into(),
+                // Rental cars.
+                "@hertz.com".into(),
+                "@enterprise.com".into(),
+                "@avis.com".into(),
+                "@budget.com".into(),
+                "@nationalcar.com".into(),
+                "@alamo.com".into(),
+                "@sixt.com".into(),
+                // Train + ground transport.
+                "@amtrak.com".into(),
+                "@eurostar.com".into(),
+                "@trainline.com".into(),
+                "@greyhound.com".into(),
+                "@megabus.com".into(),
+                // Travel-related cards / loyalty programs that send
+                // booking confirmations and itinerary updates.
+                "@tripit.com".into(),
+                "@triplog.com".into(),
+            ],
+        },
+        action: Action::FileInto {
+            folder: "Travel".into(),
+        },
+        score: 86,
         stop_on_match: true,
     }
 }
@@ -1329,6 +1426,51 @@ mod tests {
         let h = vec![];
         let hits = rules.evaluate(&ctx(&h, "dse@docusign.net", "Please sign: Master Services Agreement"));
         assert_eq!(hits.first().unwrap().id, "important_signature");
+    }
+
+    #[test]
+    fn united_flight_confirmation_routes_to_travel() {
+        let rules = CategoryRules::default();
+        let h = vec![];
+        let hits = rules.evaluate(&ctx(&h, "no-reply@united.com", "Your flight on May 12 to LAX"));
+        assert_eq!(hits.first().unwrap().id, "travel");
+    }
+
+    #[test]
+    fn marriott_reservation_routes_to_travel() {
+        let rules = CategoryRules::default();
+        let h = vec![("list-unsubscribe".into(), "<mailto:u@marriott.com>".into())];
+        let hits = rules.evaluate(&ctx(&h, "reservations@marriott.com", "Confirmation 12345 — see you May 14"));
+        assert_eq!(hits.first().unwrap().id, "travel");
+    }
+
+    #[test]
+    fn airbnb_booking_routes_to_travel() {
+        let rules = CategoryRules::default();
+        let h = vec![];
+        let hits = rules.evaluate(&ctx(&h, "automated@airbnb.com", "Your trip to Lisbon"));
+        assert_eq!(hits.first().unwrap().id, "travel");
+    }
+
+    #[test]
+    fn airline_receipt_routes_to_receipts_not_travel() {
+        // receipts (87) beats travel (86): a "Your receipt from United"
+        // is a financial record first, an itinerary second. Both
+        // sensible — but receipt-shape wins on score.
+        let rules = CategoryRules::default();
+        let h = vec![];
+        let hits = rules.evaluate(&ctx(&h, "receipts@united.com", "Your receipt from United Airlines — $429.50"));
+        assert_eq!(hits.first().unwrap().id, "receipts");
+    }
+
+    #[test]
+    fn flight_action_required_routes_to_important_not_travel() {
+        // Cancellation / "action required" must page to Important (89),
+        // not be filed quietly into Travel (86).
+        let rules = CategoryRules::default();
+        let h = vec![];
+        let hits = rules.evaluate(&ctx(&h, "alerts@united.com", "Action required: your flight has been canceled"));
+        assert_eq!(hits.first().unwrap().id, "important_billing_critical");
     }
 
     #[test]

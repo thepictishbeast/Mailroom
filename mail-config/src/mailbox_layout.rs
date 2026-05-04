@@ -114,6 +114,7 @@ impl Default for MailboxLayout {
                 LayoutFolder::subscribed("Important", Important),
                 LayoutFolder::subscribed("Updates", N),
                 LayoutFolder::subscribed("Receipts", N),
+                LayoutFolder::subscribed("Travel", N),
                 LayoutFolder::subscribed("Social", N),
                 LayoutFolder::subscribed("Promotions", N),
                 LayoutFolder::subscribed("Forums", N),
@@ -169,7 +170,7 @@ mod tests {
     fn default_layout_includes_all_categories() {
         let layout = MailboxLayout::default();
         let cats = layout.category_folders();
-        for expected in &["Updates", "Receipts", "Social", "Promotions", "Forums"] {
+        for expected in &["Updates", "Receipts", "Travel", "Social", "Promotions", "Forums"] {
             assert!(cats.contains(expected), "missing category {expected}");
         }
     }
