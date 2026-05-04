@@ -28,5 +28,10 @@ jobs:
       - name: Test
         run: cargo test --all
 
+      - name: Doc (strict)
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+        run: cargo doc --workspace --no-deps
+
       - name: Build release
         run: cargo build --release
