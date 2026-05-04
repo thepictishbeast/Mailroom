@@ -16,6 +16,13 @@ path = "src/lib.rs"
 name = "mail-tpl"
 path = "src/bin/mail-tpl.rs"
 
+# `mail-alert` — operator-facing wrapper around prebuilt::alert.
+# Use from cron / systemd timers / monitoring scripts:
+#   mail-alert --severity critical --title "..." --to oncall@... --mime | sendmail -t
+[[bin]]
+name = "mail-alert"
+path = "src/bin/mail-alert.rs"
+
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
