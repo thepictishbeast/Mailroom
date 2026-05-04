@@ -672,6 +672,64 @@ pub fn shipping_notification(
     }
 }
 
+/// Build a one-time code (2FA / sign-in code / transaction
+/// confirmation) email. Distinct from [`magic_link`] (which carries
+/// a clickable URL) — this is the bare-code shape where the user
+/// reads the code and types it back into the app.
+///
+/// `code` is the 6–8 character alphanumeric string the user types.
+/// `expires_in_minutes` is the validity window (5–10 minutes is
+/// the typical defensive default).
+///
+/// SECURITY: Codes shorter than 6 chars are easy to brute-force; a
+/// `debug_assert!` catches accidental misuse during development.
+/// Production callers must validate length at their own layer too.
+#[must_use]
+pub fn two_factor_code(code: &str, expires_in_minutes: u32) -> EmailDocument {
+    debug_assert!(
+        code.len() >= 6,
+        "two_factor_code requires at least 6 characters of entropy"
+    );
+    let blocks = vec![
+        Block::Paragraph {
+            text: format!(
+                "Use this code in the app to verify your sign-in. The code \
+                 is valid for {expires_in_minutes} minutes and can only be \
+                 used once."
+            ),
+        },
+        Block::Group(GroupCard {
+            eyebrow: "Code".into(),
+            title: "Enter this in the app".into(),
+            subtitle: None,
+            body: GroupBody::Fields {
+                fields: vec![Field {
+                    label: "Code".into(),
+                    value: code.into(),
+                    mono: true,
+                }],
+            },
+            how_to: None,
+        }),
+        Block::Paragraph {
+            text: "Didn't try to sign in? Someone may be trying to access \
+                   your account — change your password as a precaution. \
+                   Reply to this thread if you need a hand."
+                .into(),
+        },
+    ];
+
+    EmailDocument {
+        subject: format!("{code} — your PlausiDen sign-in code"),
+        preheader: format!("Single-use code, valid for {expires_in_minutes} minutes."),
+        eyebrow: Some("Sign-in code".into()),
+        heading: "Your sign-in code".into(),
+        intro: None,
+        blocks,
+        footer_lines: vec![],
+    }
+}
+
 /// Build a password-reset email — a one-tap link to a form where
 /// the user picks a new password.
 ///
@@ -931,6 +989,27 @@ mod tests {
         let html = doc.render_html();
         assert!(html.contains("Delivered"));
         assert!(!html.contains("Expected"));
+    }
+
+    #[test]
+    fn two_factor_code_renders_code_and_expiry() {
+        let doc = two_factor_code("728493", 5);
+        let html = doc.render_html();
+        assert_eq!(doc.subject, "728493 — your PlausiDen sign-in code");
+        assert!(html.contains("728493"));
+        assert!(html.contains("5 minutes"));
+        assert!(html.contains("Sign-in code"));
+        // Code rendered in the mono code-box (Field with mono=true).
+        assert!(html.contains(">728493<"));
+    }
+
+    #[test]
+    fn two_factor_code_subject_carries_code_for_inbox_preview() {
+        // Receiving clients often show the subject in inbox previews;
+        // putting the code there means the user can read it without
+        // opening the email — handy on iOS auto-fill.
+        let doc = two_factor_code("ABCDEF", 10);
+        assert!(doc.subject.starts_with("ABCDEF"));
     }
 
     #[test]
