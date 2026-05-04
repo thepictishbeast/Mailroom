@@ -376,6 +376,184 @@ pub fn weekly_digest(
     }
 }
 
+/// One labeled long-form section in a feedback submission. The
+/// public form on plausiden.com/feedback emits these as separate
+/// textareas; the email renders each as its own panel below the
+/// sender summary so the reviewer can scan top-to-bottom without a
+/// cramped key:value table.
+#[derive(Debug, Clone)]
+pub struct FeedbackSection {
+    /// Question prompt, e.g., `"What worked well"`.
+    pub label: String,
+    /// User's free-form answer.
+    pub body: String,
+}
+
+/// Build the team@-facing "new feedback received" email. Sender
+/// summary lands in a label/value group; the long-form sections
+/// each become a paragraph block so the reviewer can scroll the
+/// answers in their natural order.
+///
+/// Empty sections (no body) are silently dropped — the submitter
+/// skipped that question.
+#[must_use]
+pub fn feedback_received(
+    row_id: i64,
+    name: &str,
+    email: &str,
+    company: &str,
+    consent: &str,
+    sections: Vec<FeedbackSection>,
+    admin_url: Option<&str>,
+) -> EmailDocument {
+    let mut blocks: Vec<Block> = Vec::with_capacity(sections.len() + 2);
+    blocks.push(Block::Group(GroupCard {
+        eyebrow: "Sender".into(),
+        title: name.to_string(),
+        subtitle: Some(format!("{email}{}", if company.is_empty() {
+            String::new()
+        } else {
+            format!(" · {company}")
+        })),
+        body: GroupBody::Fields {
+            fields: vec![Field {
+                label: "Consent".into(),
+                value: if consent.is_empty() {
+                    "(none)".into()
+                } else {
+                    consent.into()
+                },
+                mono: true,
+            }],
+        },
+        how_to: None,
+    }));
+
+    let mut any_section_rendered = false;
+    for s in sections {
+        if s.body.trim().is_empty() {
+            continue;
+        }
+        any_section_rendered = true;
+        blocks.push(Block::Group(GroupCard {
+            eyebrow: s.label.clone(),
+            title: String::new(), // section eyebrow carries the label
+            subtitle: None,
+            body: GroupBody::Fields {
+                fields: vec![Field {
+                    label: "Answer".into(),
+                    value: s.body,
+                    mono: false,
+                }],
+            },
+            how_to: None,
+        }));
+    }
+    if !any_section_rendered {
+        blocks.push(Block::Paragraph {
+            text: "(No long-form answers provided.)".into(),
+        });
+    }
+
+    if let Some(url) = admin_url {
+        blocks.push(Block::Cta(Cta {
+            label: "View in admin →".into(),
+            href: url.into(),
+        }));
+    }
+
+    EmailDocument {
+        subject: format!("[feedback #{row_id}] {name}"),
+        preheader: format!("New feedback from {name} (#{row_id})"),
+        eyebrow: Some(format!("Feedback · #{row_id}")),
+        heading: "New feedback received".into(),
+        intro: Some(format!(
+            "Submitted via the public form at plausiden.com/feedback."
+        )),
+        blocks,
+        footer_lines: vec![],
+    }
+}
+
+/// Build the team@-facing "new contact inquiry" email. Mirrors the
+/// shape of the public /contact form on plausiden.com.
+///
+/// The "Reply to {name} →" CTA opens the recipient's mail client
+/// with `reply_to` pre-filled — the operator can respond with one
+/// click instead of copy-pasting the address.
+#[must_use]
+pub fn inquiry_received(
+    name: &str,
+    reply_to: &str,
+    phone: &str,
+    company: &str,
+    service: &str,
+    message: &str,
+) -> EmailDocument {
+    let or_omitted = |s: &str| {
+        if s.is_empty() {
+            "(omitted)".to_string()
+        } else {
+            s.to_string()
+        }
+    };
+
+    let blocks: Vec<Block> = vec![
+        Block::Group(GroupCard {
+            eyebrow: "Sender".into(),
+            title: or_omitted(name),
+            subtitle: Some(or_omitted(reply_to)),
+            body: GroupBody::Fields {
+                fields: vec![
+                    Field {
+                        label: "Phone".into(),
+                        value: or_omitted(phone),
+                        mono: false,
+                    },
+                    Field {
+                        label: "Company".into(),
+                        value: or_omitted(company),
+                        mono: false,
+                    },
+                    Field {
+                        label: "Service".into(),
+                        value: or_omitted(service),
+                        mono: false,
+                    },
+                ],
+            },
+            how_to: None,
+        }),
+        Block::Group(GroupCard {
+            eyebrow: "Message".into(),
+            title: String::new(),
+            subtitle: None,
+            body: GroupBody::Fields {
+                fields: vec![Field {
+                    label: "Body".into(),
+                    value: message.to_string(),
+                    mono: false,
+                }],
+            },
+            how_to: None,
+        }),
+        Block::Cta(Cta {
+            label: format!("Reply to {} →", or_omitted(name)),
+            href: format!("mailto:{}", reply_to),
+        }),
+    ];
+
+    EmailDocument {
+        subject: format!("Inquiry from {}", or_omitted(name)),
+        preheader: format!("Inquiry from {} via plausiden.com/contact", or_omitted(name)),
+        eyebrow: Some("New inquiry".into()),
+        heading: "New encrypted inquiry".into(),
+        intro: Some("Submitted via the public form at plausiden.com/contact.".into()),
+        blocks,
+        footer_lines: vec![],
+    }
+}
+
 /// Build the "Sign in to PlausiDen admin" magic-link email.
 #[must_use]
 pub fn magic_link(link: &str) -> EmailDocument {
@@ -558,6 +736,96 @@ mod tests {
         assert!(!html.contains("Open runbook"));
         // Default on-call line falls back to the team@ contact.
         assert!(html.contains("team@plausiden.com"));
+    }
+
+    #[test]
+    fn feedback_received_renders_sender_and_sections() {
+        let doc = feedback_received(
+            42,
+            "Tim Porter",
+            "tim@example.com",
+            "Sacred.Vote",
+            "full",
+            vec![
+                FeedbackSection {
+                    label: "What worked well".into(),
+                    body: "the explainer".into(),
+                },
+                FeedbackSection {
+                    label: "What didn't".into(),
+                    body: String::new(), // skipped
+                },
+                FeedbackSection {
+                    label: "Why chose PlausiDen".into(),
+                    body: "the audit trail".into(),
+                },
+            ],
+            Some("https://plausiden.com/admin/feedback"),
+        );
+        let html = doc.render_html();
+        assert_eq!(doc.subject, "[feedback #42] Tim Porter");
+        assert!(html.contains("Tim Porter"));
+        assert!(html.contains("Sacred.Vote"));
+        assert!(html.contains("the explainer"));
+        assert!(html.contains("the audit trail"));
+        // Empty section dropped
+        assert!(!html.contains("What didn"));
+        // Admin CTA
+        assert!(html.contains("View in admin"));
+        assert!(html.contains("/admin/feedback"));
+    }
+
+    #[test]
+    fn feedback_received_handles_no_sections_gracefully() {
+        let doc = feedback_received(7, "anon", "a@x", "", "", vec![], None);
+        let html = doc.render_html();
+        assert!(html.contains("No long-form answers"));
+        // No CTA when admin URL omitted
+        assert!(!html.contains("View in admin"));
+    }
+
+    #[test]
+    fn inquiry_received_has_reply_cta_with_mailto() {
+        let doc = inquiry_received(
+            "Mallory",
+            "m@example.com",
+            "555-1234",
+            "Acme",
+            "DR retainer",
+            "We need a DR posture review by EOQ.",
+        );
+        let html = doc.render_html();
+        assert_eq!(doc.subject, "Inquiry from Mallory");
+        assert!(html.contains("Reply to Mallory"));
+        assert!(html.contains("mailto:m@example.com"));
+        // Field values flow through
+        assert!(html.contains("555-1234"));
+        assert!(html.contains("Acme"));
+        assert!(html.contains("DR retainer"));
+        assert!(html.contains("DR posture review"));
+    }
+
+    #[test]
+    fn inquiry_received_renders_omitted_for_empty_optional_fields() {
+        let doc = inquiry_received("Anon", "a@x", "", "", "", "Hi");
+        let html = doc.render_html();
+        assert!(html.contains("(omitted)"));
+    }
+
+    #[test]
+    fn inquiry_received_escapes_message_body() {
+        // Pathological message body — escape pass must hold.
+        let doc = inquiry_received(
+            "Mallory",
+            "m@x.com",
+            "",
+            "",
+            "",
+            "<img src=x onerror=alert(1)>",
+        );
+        let html = doc.render_html();
+        assert!(!html.contains("<img src=x"));
+        assert!(html.contains("&lt;img src=x"));
     }
 
     #[test]
