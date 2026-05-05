@@ -19,7 +19,7 @@ pub(crate) fn render(doc: &EmailDocument) -> String {
         let _ = writeln!(out, "[{}]", eyebrow);
     }
     let _ = writeln!(out, "{}", doc.heading);
-    let _ = writeln!(out, "{}", &RULE_HEAVY[..doc.heading.chars().count().min(60).max(8)]);
+    let _ = writeln!(out, "{}", &RULE_HEAVY[..doc.heading.chars().count().clamp(8, 60)]);
     out.push('\n');
 
     if let Some(intro) = &doc.intro {
@@ -48,7 +48,7 @@ fn render_block(block: &Block, out: &mut String) {
         Block::Group(g) => render_group(g, out),
         Block::SectionHeading { text: h } => {
             let _ = writeln!(out, "{}", h);
-            let _ = writeln!(out, "{}", &RULE_LIGHT[..h.chars().count().min(60).max(4)]);
+            let _ = writeln!(out, "{}", &RULE_LIGHT[..h.chars().count().clamp(4, 60)]);
             out.push('\n');
         }
         Block::Paragraph { text: p } => {
@@ -67,7 +67,7 @@ fn render_group(g: &GroupCard, out: &mut String) {
             let _ = writeln!(out, "  {}", line);
         }
     }
-    let _ = writeln!(out, "{}", &RULE_LIGHT[..(g.title.chars().count() + g.eyebrow.chars().count() + 3).min(60).max(8)]);
+    let _ = writeln!(out, "{}", &RULE_LIGHT[..(g.title.chars().count() + g.eyebrow.chars().count() + 3).clamp(8, 60)]);
 
     match &g.body {
         GroupBody::Fields { fields } => {

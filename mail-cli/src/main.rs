@@ -241,7 +241,7 @@ fn cmd_calendar_parse(format: &str) -> Result<()> {
         "ics" => {
             print!("{}", mail_calendar::write_ics(&items));
         }
-        "summary" | _ => {
+        _ => {
             println!("{} item(s):", items.len());
             for item in &items {
                 match item {
