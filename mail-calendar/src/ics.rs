@@ -351,9 +351,8 @@ fn parse_nested_alarm(
     c: &Component,
     anchor: DateTime<Utc>,
 ) -> Result<Option<Reminder>, IcsError> {
-    let trigger_raw = match c.prop_value("TRIGGER") {
-        Some(t) => t,
-        None => return Ok(None),
+    let Some(trigger_raw) = c.prop_value("TRIGGER") else {
+        return Ok(None);
     };
     let trigger = if trigger_raw.starts_with("-PT") || trigger_raw.starts_with("PT") {
         resolve_relative_trigger(trigger_raw, anchor)?
@@ -414,11 +413,7 @@ fn parse_datetime(raw: &str, field: &'static str) -> Result<(DateTime<Utc>, bool
 /// Resolve a relative TRIGGER (`-PT15M`, `PT1H30M`) against an anchor.
 fn resolve_relative_trigger(raw: &str, anchor: DateTime<Utc>) -> Result<DateTime<Utc>, IcsError> {
     let s = raw.trim();
-    let (sign, body) = if let Some(rest) = s.strip_prefix('-') {
-        (-1i64, rest)
-    } else {
-        (1i64, s)
-    };
+    let (sign, body) = s.strip_prefix('-').map_or((1i64, s), |rest| (-1i64, rest));
     let body = body.strip_prefix("PT").ok_or_else(|| IcsError::BadDateTime {
         field: "TRIGGER",
         value: raw.to_string(),
