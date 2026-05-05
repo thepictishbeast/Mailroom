@@ -240,40 +240,44 @@ mod tests {
                     eyebrow: "Group A".into(),
                     title: "First group".into(),
                     subtitle: Some("With a subtitle.".into()),
-                    body: GroupBody::Fields { fields: vec![
-                        Field {
-                            label: "Host".into(),
-                            value: "outreach".into(),
-                            mono: true,
-                        },
-                        Field {
-                            label: "Type".into(),
-                            value: "TXT".into(),
-                            mono: true,
-                        },
-                    ] },
+                    body: GroupBody::Fields {
+                        fields: vec![
+                            Field {
+                                label: "Host".into(),
+                                value: "outreach".into(),
+                                mono: true,
+                            },
+                            Field {
+                                label: "Type".into(),
+                                value: "TXT".into(),
+                                mono: true,
+                            },
+                        ],
+                    },
                     how_to: Some("After publishing, run <code>dig +short</code>.".into()),
                 }),
                 Block::Group(GroupCard {
                     eyebrow: "Group B".into(),
                     title: "Records — nested".into(),
                     subtitle: None,
-                    body: GroupBody::Records { records: vec![
-                        RecordCard {
-                            eyebrow: "Record 1 of 2".into(),
-                            primary_label: "outreach".into(),
-                            type_tag: Some("A".into()),
-                            value: "207.246.86.218".into(),
-                            note: None,
-                        },
-                        RecordCard {
-                            eyebrow: "Record 2 of 2".into(),
-                            primary_label: "outreach._domainkey.outreach".into(),
-                            type_tag: Some("TXT".into()),
-                            value: "v=DKIM1; ...".into(),
-                            note: Some("One continuous string — do not split.".into()),
-                        },
-                    ] },
+                    body: GroupBody::Records {
+                        records: vec![
+                            RecordCard {
+                                eyebrow: "Record 1 of 2".into(),
+                                primary_label: "outreach".into(),
+                                type_tag: Some("A".into()),
+                                value: "207.246.86.218".into(),
+                                note: None,
+                            },
+                            RecordCard {
+                                eyebrow: "Record 2 of 2".into(),
+                                primary_label: "outreach._domainkey.outreach".into(),
+                                type_tag: Some("TXT".into()),
+                                value: "v=DKIM1; ...".into(),
+                                note: Some("One continuous string — do not split.".into()),
+                            },
+                        ],
+                    },
                     how_to: None,
                 }),
                 Block::SectionHeading {

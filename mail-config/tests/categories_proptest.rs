@@ -23,9 +23,7 @@
 //! "why is this here?" UI can rely on the evaluator behaving
 //! deterministically across versions.
 
-use mail_config::categories::{
-    Action, CategoryRule, CategoryRules, MatchExpr, MessageContext,
-};
+use mail_config::categories::{Action, CategoryRule, CategoryRules, MatchExpr, MessageContext};
 use proptest::prelude::*;
 
 /// Generate a valid `MatchExpr`. We bias toward header-based
@@ -33,13 +31,11 @@ use proptest::prelude::*;
 fn arb_match_expr() -> impl Strategy<Value = MatchExpr> {
     prop_oneof![
         Just(MatchExpr::Always),
-        ("[a-z][a-z0-9-]{0,15}", "[a-zA-Z0-9 ._-]{1,30}").prop_map(
-            |(header, substring)| MatchExpr::HeaderContains { header, substring }
-        ),
+        ("[a-z][a-z0-9-]{0,15}", "[a-zA-Z0-9 ._-]{1,30}")
+            .prop_map(|(header, substring)| MatchExpr::HeaderContains { header, substring }),
         "[a-z][a-z0-9-]{0,15}".prop_map(|header| MatchExpr::HasHeader { header }),
-        "@[a-z0-9][a-z0-9.-]{0,20}\\.[a-z]{2,5}".prop_map(|d| MatchExpr::FromDomainIn {
-            domains: vec![d]
-        }),
+        "@[a-z0-9][a-z0-9.-]{0,20}\\.[a-z]{2,5}"
+            .prop_map(|d| MatchExpr::FromDomainIn { domains: vec![d] }),
         prop::collection::vec("[a-zA-Z]{1,15}", 1..3)
             .prop_map(|needles| MatchExpr::SubjectContainsAny { needles }),
     ]
@@ -55,23 +51,22 @@ fn arb_rule() -> impl Strategy<Value = CategoryRule> {
         any::<bool>(),
         "[A-Za-z][A-Za-z0-9._/-]{1,30}", // folder
     )
-        .prop_map(|(id, display_name, when, score, stop, folder)| CategoryRule {
-            id,
-            display_name,
-            when,
-            action: Action::FileInto { folder },
-            score,
-            stop_on_match: stop,
-        })
+        .prop_map(
+            |(id, display_name, when, score, stop, folder)| CategoryRule {
+                id,
+                display_name,
+                when,
+                action: Action::FileInto { folder },
+                score,
+                stop_on_match: stop,
+            },
+        )
 }
 
 /// Generate a `(headers, from, subject)` triple.
 fn arb_message() -> impl Strategy<Value = (Vec<(String, String)>, String, String)> {
     (
-        prop::collection::vec(
-            ("[a-z][a-z0-9-]{1,20}", "[a-zA-Z0-9 .,@_-]{0,80}"),
-            0..6,
-        ),
+        prop::collection::vec(("[a-z][a-z0-9-]{1,20}", "[a-zA-Z0-9 .,@_-]{0,80}"), 0..6),
         "[a-z][a-z0-9.+_-]{0,15}@[a-z][a-z0-9.-]{0,20}\\.[a-z]{2,5}",
         "[A-Za-z0-9 ]{0,60}",
     )

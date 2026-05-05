@@ -6,11 +6,11 @@
 
 #![forbid(unsafe_code)]
 
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use mail_config::{
-    CategoryRules, Domain, Mailbox, MailboxKind, MailboxLayout,
-    categories::SieveEmitOptions, dovecot::generate_sieve_runtime_conf,
+    categories::SieveEmitOptions, dovecot::generate_sieve_runtime_conf, CategoryRules, Domain,
+    Mailbox, MailboxKind, MailboxLayout,
 };
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -25,7 +25,11 @@ const DEFAULT_SIEVE_RUNTIME_CONF: &str = "/etc/dovecot/conf.d/90-sieve.conf";
 #[command(name = "mail-admin", version, about = "Manage the secure email server")]
 struct Cli {
     /// Path to the orchestrator TOML config file.
-    #[arg(short, long, default_value = "/etc/mail-orchestrator/orchestrator.toml")]
+    #[arg(
+        short,
+        long,
+        default_value = "/etc/mail-orchestrator/orchestrator.toml"
+    )]
     config: PathBuf,
 
     #[command(subcommand)]
@@ -204,18 +208,29 @@ fn main() -> Result<()> {
         Commands::Vmailbox { domain } => cmd_vmailbox(&domain),
         Commands::Log { limit, mailbox } => cmd_log(limit, mailbox.as_deref()),
         Commands::TestSmtp { host, port } => cmd_test_smtp(&host, port),
-        Commands::EmitCategories { output, stdout, audit_headers, force } => {
-            cmd_emit_categories(&output, stdout, audit_headers, force)
-        }
-        Commands::EmitMailboxes { output, stdout, force } => {
-            cmd_emit_mailboxes(&output, stdout, force)
-        }
-        Commands::EmitSieveRuntime { output, categories_path, stdout, audit_headers, force } => {
-            cmd_emit_sieve_runtime(&output, &categories_path, stdout, audit_headers, force)
-        }
-        Commands::EmitAll { stdout, audit_headers, force } => {
-            cmd_emit_all(stdout, audit_headers, force)
-        }
+        Commands::EmitCategories {
+            output,
+            stdout,
+            audit_headers,
+            force,
+        } => cmd_emit_categories(&output, stdout, audit_headers, force),
+        Commands::EmitMailboxes {
+            output,
+            stdout,
+            force,
+        } => cmd_emit_mailboxes(&output, stdout, force),
+        Commands::EmitSieveRuntime {
+            output,
+            categories_path,
+            stdout,
+            audit_headers,
+            force,
+        } => cmd_emit_sieve_runtime(&output, &categories_path, stdout, audit_headers, force),
+        Commands::EmitAll {
+            stdout,
+            audit_headers,
+            force,
+        } => cmd_emit_all(stdout, audit_headers, force),
         Commands::Classify => cmd_classify(),
         Commands::CalendarParse { format } => cmd_calendar_parse(&format),
         Commands::CalendarMerge { path } => cmd_calendar_merge(&path),
@@ -230,8 +245,7 @@ fn cmd_calendar_parse(format: &str) -> Result<()> {
     use std::io::Read as _;
     let mut buf = String::new();
     std::io::stdin().read_to_string(&mut buf)?;
-    let items = mail_calendar::parse_ics(&buf)
-        .map_err(|e| anyhow::anyhow!("parse_ics: {e}"))?;
+    let items = mail_calendar::parse_ics(&buf).map_err(|e| anyhow::anyhow!("parse_ics: {e}"))?;
 
     match format {
         "json" => {
@@ -255,9 +269,10 @@ fn cmd_calendar_parse(format: &str) -> Result<()> {
                         );
                     }
                     mail_calendar::CalendarItem::Todo(t) => {
-                        let due = t
-                            .due
-                            .map_or_else(|| "(no due)".to_string(), |d| d.format("%Y-%m-%d").to_string());
+                        let due = t.due.map_or_else(
+                            || "(no due)".to_string(),
+                            |d| d.format("%Y-%m-%d").to_string(),
+                        );
                         println!(
                             "  TODO   {uid}  due {due}  {summary}",
                             uid = t.uid,
@@ -282,8 +297,8 @@ fn cmd_calendar_merge(path: &Path) -> Result<()> {
     use std::io::Read as _;
     let mut buf = String::new();
     std::io::stdin().read_to_string(&mut buf)?;
-    let incoming = mail_calendar::parse_ics(&buf)
-        .map_err(|e| anyhow::anyhow!("parse_ics on stdin: {e}"))?;
+    let incoming =
+        mail_calendar::parse_ics(&buf).map_err(|e| anyhow::anyhow!("parse_ics on stdin: {e}"))?;
     let report = mail_calendar::merge::merge_to_file(path, &incoming)
         .map_err(|e| anyhow::anyhow!("merge_to_file: {e}"))?;
 
@@ -355,7 +370,12 @@ fn cmd_classify() -> Result<()> {
     } else {
         println!("Rules that would fire (in order):");
         for r in hits {
-            println!("  - {} (score={}) → {}", r.id, r.score, action_summary(&r.action));
+            println!(
+                "  - {} (score={}) → {}",
+                r.id,
+                r.score,
+                action_summary(&r.action)
+            );
             if r.stop_on_match {
                 println!("    [stop_on_match: subsequent rules skipped]");
             }
@@ -494,7 +514,11 @@ fn render_and_write(
     }
 
     write_atomic(output, rendered).with_context(|| format!("write {label}"))?;
-    println!("[{label}] WROTE {} ({} bytes)", output.display(), rendered.len());
+    println!(
+        "[{label}] WROTE {} ({} bytes)",
+        output.display(),
+        rendered.len()
+    );
     println!("    → run `systemctl reload dovecot` to pick up changes");
     Ok(true)
 }
@@ -514,13 +538,8 @@ fn write_atomic(output: &Path, contents: &str) -> Result<()> {
         std::process::id()
     ));
     std::fs::write(&tmp, contents).with_context(|| format!("write tmp {}", tmp.display()))?;
-    std::fs::rename(&tmp, output).with_context(|| {
-        format!(
-            "rename {} → {}",
-            tmp.display(),
-            output.display()
-        )
-    })?;
+    std::fs::rename(&tmp, output)
+        .with_context(|| format!("rename {} → {}", tmp.display(), output.display()))?;
     Ok(())
 }
 
@@ -564,7 +583,9 @@ fn cmd_emit_categories(
     audit_headers: bool,
     force: bool,
 ) -> Result<()> {
-    let opts = SieveEmitOptions { audit_header: audit_headers };
+    let opts = SieveEmitOptions {
+        audit_header: audit_headers,
+    };
     let rendered = CategoryRules::default().to_sieve_with(opts);
     render_and_write("categories.sieve", output, &rendered, stdout, force).map(|_| ())
 }
@@ -596,11 +617,11 @@ fn cmd_emit_all(stdout: bool, audit_headers: bool, force: bool) -> Result<()> {
     let mb_path = PathBuf::from(DEFAULT_MAILBOXES_CONF);
     let runtime_path = PathBuf::from(DEFAULT_SIEVE_RUNTIME_CONF);
 
-    let cats_rendered =
-        CategoryRules::default().to_sieve_with(SieveEmitOptions { audit_header: audit_headers });
+    let cats_rendered = CategoryRules::default().to_sieve_with(SieveEmitOptions {
+        audit_header: audit_headers,
+    });
     let mb_rendered = MailboxLayout::default().to_dovecot_conf();
-    let runtime_rendered =
-        generate_sieve_runtime_conf(cats_path.to_str().unwrap(), audit_headers);
+    let runtime_rendered = generate_sieve_runtime_conf(cats_path.to_str().unwrap(), audit_headers);
 
     let mut any_changed = false;
     for (label, path, rendered) in [
@@ -631,10 +652,16 @@ fn cmd_validate() -> Result<()> {
     let mut errors = 0;
 
     // Check Postfix vmailbox
-    print!("  Postfix vmailbox ({})... ", mail_config::postfix::VMAILBOX_PATH);
+    print!(
+        "  Postfix vmailbox ({})... ",
+        mail_config::postfix::VMAILBOX_PATH
+    );
     match mail_config::postfix::read_vmailbox(Path::new(mail_config::postfix::VMAILBOX_PATH)) {
         Ok(entries) => println!("OK ({} entries)", entries.len()),
-        Err(e) => { println!("FAIL: {}", e); errors += 1; }
+        Err(e) => {
+            println!("FAIL: {}", e);
+            errors += 1;
+        }
     }
 
     // Check Dovecot passwd file
@@ -645,7 +672,10 @@ fn cmd_validate() -> Result<()> {
             let entries = mail_config::dovecot::parse_passwd_file(&content);
             println!("OK ({} users)", entries.len());
         }
-        Err(e) => { println!("FAIL: {}", e); errors += 1; }
+        Err(e) => {
+            println!("FAIL: {}", e);
+            errors += 1;
+        }
     }
 
     // Check DKIM keys directory
@@ -655,7 +685,10 @@ fn cmd_validate() -> Result<()> {
             let count = entries.filter_map(|e| e.ok()).count();
             println!("OK ({} domain dirs)", count);
         }
-        Err(e) => { println!("FAIL: {}", e); errors += 1; }
+        Err(e) => {
+            println!("FAIL: {}", e);
+            errors += 1;
+        }
     }
 
     // Check DKIM config files. Use the resolver functions so verify-config
@@ -664,13 +697,22 @@ fn cmd_validate() -> Result<()> {
     // canonical path on a fresh box where neither variant exists yet.
     for (name, path) in [
         ("KeyTable", mail_config::dkim::resolve_key_table_path()),
-        ("SigningTable", mail_config::dkim::resolve_signing_table_path()),
-        ("TrustedHosts", mail_config::dkim::resolve_trusted_hosts_path()),
+        (
+            "SigningTable",
+            mail_config::dkim::resolve_signing_table_path(),
+        ),
+        (
+            "TrustedHosts",
+            mail_config::dkim::resolve_trusted_hosts_path(),
+        ),
     ] {
         print!("  OpenDKIM {} ({})... ", name, path);
         match std::fs::metadata(path) {
             Ok(m) => println!("OK ({} bytes)", m.len()),
-            Err(e) => { println!("FAIL: {}", e); errors += 1; }
+            Err(e) => {
+                println!("FAIL: {}", e);
+                errors += 1;
+            }
         }
     }
 
@@ -709,7 +751,12 @@ fn cmd_health() -> Result<()> {
 
     // Check ports
     println!();
-    for (port, desc) in [(25, "SMTP"), (587, "Submission"), (993, "IMAPS"), (4190, "ManageSieve")] {
+    for (port, desc) in [
+        (25, "SMTP"),
+        (587, "Submission"),
+        (993, "IMAPS"),
+        (4190, "ManageSieve"),
+    ] {
         print!("  Port {} ({})... ", port, desc);
         match std::net::TcpStream::connect_timeout(
             &format!("127.0.0.1:{}", port).parse().unwrap(),
@@ -765,8 +812,7 @@ fn cmd_generate_sieve(domain: &str, write: bool) -> Result<()> {
             std::fs::create_dir_all(&sieve_dir)
                 .with_context(|| format!("Failed to create {}", sieve_dir))?;
             let path = format!("{}/default.sieve", sieve_dir);
-            std::fs::write(&path, &script)
-                .with_context(|| format!("Failed to write {}", path))?;
+            std::fs::write(&path, &script).with_context(|| format!("Failed to write {}", path))?;
             println!("  Wrote {}", path);
         } else {
             println!("--- {}@{} ({:?}) ---", local, domain, kind);
@@ -786,8 +832,14 @@ fn cmd_dkim_status(domain: &str) -> Result<()> {
     };
 
     println!("DKIM Configuration for {}\n", domain);
-    println!("  KeyTable entry:     {}", mail_config::dkim::key_table_entry(&d));
-    println!("  SigningTable entry:  {}", mail_config::dkim::signing_table_entry(&d));
+    println!(
+        "  KeyTable entry:     {}",
+        mail_config::dkim::key_table_entry(&d)
+    );
+    println!(
+        "  SigningTable entry:  {}",
+        mail_config::dkim::signing_table_entry(&d)
+    );
 
     let key_path = mail_config::dkim::key_path(domain, "default");
     print!("  Private key:        {} ", key_path);
@@ -866,14 +918,20 @@ fn cmd_log(limit: usize, mailbox: Option<&str>) -> Result<()> {
         ))
     })?;
 
-    println!("{:<20} {:<8} {:<30} {:<30} {:<10} {:<40}", "Time", "Dir", "From", "To", "Status", "Subject");
+    println!(
+        "{:<20} {:<8} {:<30} {:<30} {:<10} {:<40}",
+        "Time", "Dir", "From", "To", "Status", "Subject"
+    );
     println!("{}", "-".repeat(140));
 
     for row in rows {
         let (time, dir, from, to, subject, _mailbox, status) = row?;
         let subj = subject.unwrap_or_default();
         let subj_short: String = subj.chars().take(40).collect();
-        println!("{:<20} {:<8} {:<30} {:<30} {:<10} {}", time, dir, from, to, status, subj_short);
+        println!(
+            "{:<20} {:<8} {:<30} {:<30} {:<10} {}",
+            time, dir, from, to, status, subj_short
+        );
     }
 
     Ok(())
@@ -889,7 +947,8 @@ fn cmd_test_smtp(host: &str, port: u16) -> Result<()> {
     let mut stream = TcpStream::connect_timeout(
         &addr.parse().context("Invalid address")?,
         std::time::Duration::from_secs(5),
-    ).context("Connection failed")?;
+    )
+    .context("Connection failed")?;
 
     stream.set_read_timeout(Some(std::time::Duration::from_secs(5)))?;
 

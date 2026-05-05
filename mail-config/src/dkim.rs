@@ -85,10 +85,7 @@ pub fn signing_table_entry(domain: &Domain) -> String {
 
 /// Generate TrustedHosts content for multiple domains.
 pub fn trusted_hosts(domains: &[Domain]) -> String {
-    let mut lines = vec![
-        "127.0.0.1".to_string(),
-        "localhost".to_string(),
-    ];
+    let mut lines = vec!["127.0.0.1".to_string(), "localhost".to_string()];
     for d in domains {
         lines.push(format!("*.{}", d.name));
     }

@@ -3,11 +3,11 @@
 //! Tests that the mail-config crate produces valid Postfix, Dovecot,
 //! DKIM, and Sieve configurations for the Sacred.Vote two-domain setup.
 
-use mail_config::{Domain, Mailbox, MailboxKind};
-use mail_config::postfix;
-use mail_config::dovecot;
 use mail_config::dkim;
+use mail_config::dovecot;
+use mail_config::postfix;
 use mail_config::sieve;
+use mail_config::{Domain, Mailbox, MailboxKind};
 
 fn sacred_vote_domains() -> Vec<Domain> {
     vec![
@@ -16,11 +16,31 @@ fn sacred_vote_domains() -> Vec<Domain> {
             dkim_enabled: true,
             dkim_selector: "default".into(),
             mailboxes: vec![
-                Mailbox { local_part: "tim".into(), kind: MailboxKind::User, display_name: Some("Tim".into()) },
-                Mailbox { local_part: "admin".into(), kind: MailboxKind::Service, display_name: None },
-                Mailbox { local_part: "noreply".into(), kind: MailboxKind::Service, display_name: None },
-                Mailbox { local_part: "support".into(), kind: MailboxKind::Service, display_name: None },
-                Mailbox { local_part: "router".into(), kind: MailboxKind::Router, display_name: None },
+                Mailbox {
+                    local_part: "tim".into(),
+                    kind: MailboxKind::User,
+                    display_name: Some("Tim".into()),
+                },
+                Mailbox {
+                    local_part: "admin".into(),
+                    kind: MailboxKind::Service,
+                    display_name: None,
+                },
+                Mailbox {
+                    local_part: "noreply".into(),
+                    kind: MailboxKind::Service,
+                    display_name: None,
+                },
+                Mailbox {
+                    local_part: "support".into(),
+                    kind: MailboxKind::Service,
+                    display_name: None,
+                },
+                Mailbox {
+                    local_part: "router".into(),
+                    kind: MailboxKind::Router,
+                    display_name: None,
+                },
             ],
         },
         Domain {
@@ -28,9 +48,21 @@ fn sacred_vote_domains() -> Vec<Domain> {
             dkim_enabled: true,
             dkim_selector: "default".into(),
             mailboxes: vec![
-                Mailbox { local_part: "legal".into(), kind: MailboxKind::Legal, display_name: None },
-                Mailbox { local_part: "security".into(), kind: MailboxKind::Service, display_name: None },
-                Mailbox { local_part: "privacy".into(), kind: MailboxKind::Service, display_name: None },
+                Mailbox {
+                    local_part: "legal".into(),
+                    kind: MailboxKind::Legal,
+                    display_name: None,
+                },
+                Mailbox {
+                    local_part: "security".into(),
+                    kind: MailboxKind::Service,
+                    display_name: None,
+                },
+                Mailbox {
+                    local_part: "privacy".into(),
+                    kind: MailboxKind::Service,
+                    display_name: None,
+                },
             ],
         },
     ]
@@ -43,9 +75,21 @@ fn vmailbox_entries_all_present() {
         let entries = postfix::generate_vmailbox_entries(domain);
         assert_eq!(entries.len(), domain.mailboxes.len());
         for entry in &entries {
-            assert!(entry.contains(&domain.name), "entry missing domain: {}", entry);
-            assert!(entry.contains("  "), "missing double-space separator: {}", entry);
-            assert!(entry.ends_with('/'), "maildir path should end with /: {}", entry);
+            assert!(
+                entry.contains(&domain.name),
+                "entry missing domain: {}",
+                entry
+            );
+            assert!(
+                entry.contains("  "),
+                "missing double-space separator: {}",
+                entry
+            );
+            assert!(
+                entry.ends_with('/'),
+                "maildir path should end with /: {}",
+                entry
+            );
         }
     }
 }
@@ -106,7 +150,10 @@ fn dkim_key_and_signing_tables_consistent() {
         // Both reference the same selector._domainkey.domain
         let domainkey = format!("{}._domainkey.{}", domain.dkim_selector, domain.name);
         assert!(kt.contains(&domainkey), "KeyTable missing domainkey ref");
-        assert!(st.contains(&domainkey), "SigningTable missing domainkey ref");
+        assert!(
+            st.contains(&domainkey),
+            "SigningTable missing domainkey ref"
+        );
         // Signing table maps *@domain
         assert!(st.starts_with(&format!("*@{}", domain.name)));
     }
@@ -131,7 +178,11 @@ fn dkim_key_paths_correct() {
 
 #[test]
 fn sieve_noreply_rejects() {
-    let mb = Mailbox { local_part: "noreply".into(), kind: MailboxKind::Service, display_name: None };
+    let mb = Mailbox {
+        local_part: "noreply".into(),
+        kind: MailboxKind::Service,
+        display_name: None,
+    };
     let script = sieve::generate_sieve(&mb, "sacred.vote");
     assert!(script.contains("reject"));
     assert!(script.contains("noreply@sacred.vote"));
@@ -140,7 +191,11 @@ fn sieve_noreply_rejects() {
 
 #[test]
 fn sieve_router_files_into_processing() {
-    let mb = Mailbox { local_part: "router".into(), kind: MailboxKind::Router, display_name: None };
+    let mb = Mailbox {
+        local_part: "router".into(),
+        kind: MailboxKind::Router,
+        display_name: None,
+    };
     let script = sieve::generate_sieve(&mb, "sacred.vote");
     assert!(script.contains("fileinto"));
     assert!(script.contains("Processing"));
@@ -148,7 +203,11 @@ fn sieve_router_files_into_processing() {
 
 #[test]
 fn sieve_service_non_noreply_files_into_service() {
-    let mb = Mailbox { local_part: "admin".into(), kind: MailboxKind::Service, display_name: None };
+    let mb = Mailbox {
+        local_part: "admin".into(),
+        kind: MailboxKind::Service,
+        display_name: None,
+    };
     let script = sieve::generate_sieve(&mb, "sacred.vote");
     assert!(script.contains("fileinto"));
     assert!(script.contains("Service"));
@@ -156,7 +215,11 @@ fn sieve_service_non_noreply_files_into_service() {
 
 #[test]
 fn sieve_legal_gets_standard_filter() {
-    let mb = Mailbox { local_part: "legal".into(), kind: MailboxKind::Legal, display_name: None };
+    let mb = Mailbox {
+        local_part: "legal".into(),
+        kind: MailboxKind::Legal,
+        display_name: None,
+    };
     let script = sieve::generate_sieve(&mb, "sacredvote.org");
     assert!(script.contains("legal@sacredvote.org"));
     assert!(!script.contains("reject"));
@@ -183,9 +246,17 @@ fn all_mailbox_kinds_produce_sieve() {
         ("legal", MailboxKind::Legal),
     ];
     for (local, kind) in &kinds {
-        let mb = Mailbox { local_part: local.to_string(), kind: *kind, display_name: None };
+        let mb = Mailbox {
+            local_part: local.to_string(),
+            kind: *kind,
+            display_name: None,
+        };
         let script = sieve::generate_sieve(&mb, "test.com");
         assert!(!script.is_empty(), "Sieve script empty for {}", local);
-        assert!(script.contains("require"), "Sieve missing require for {}", local);
+        assert!(
+            script.contains("require"),
+            "Sieve missing require for {}",
+            local
+        );
     }
 }

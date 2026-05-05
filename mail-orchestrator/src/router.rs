@@ -181,7 +181,10 @@ pub fn execute_command(
                 Some("Mail Orchestrator"),
                 &sender_addr,
                 "Router Command Failed",
-                &format!("Your router command could not be parsed.\n\nError: {}\n\nTracking ID: {}", e, tracking_id),
+                &format!(
+                    "Your router command could not be parsed.\n\nError: {}\n\nTracking ID: {}",
+                    e, tracking_id
+                ),
             );
             return Ok(());
         }
@@ -203,7 +206,10 @@ pub fn execute_command(
             Some("Mail Orchestrator"),
             &sender_addr,
             "Router Command Rejected",
-            &format!("Identity '{}' is not in the allowed sender list.\n\nTracking ID: {}", cmd.from, tracking_id),
+            &format!(
+                "Identity '{}' is not in the allowed sender list.\n\nTracking ID: {}",
+                cmd.from, tracking_id
+            ),
         );
         return Ok(());
     }
@@ -325,7 +331,8 @@ mod tests {
 
     #[test]
     fn parse_valid_command() {
-        let body = "TO: voter@example.com\nFROM: admin@sacred.vote\nSUBJECT: Welcome\n---\nHello there.";
+        let body =
+            "TO: voter@example.com\nFROM: admin@sacred.vote\nSUBJECT: Welcome\n---\nHello there.";
         let cmd = parse_command(body).unwrap();
         assert_eq!(cmd.to, "voter@example.com");
         assert_eq!(cmd.from, "admin@sacred.vote");
@@ -383,7 +390,8 @@ mod tests {
     #[test]
     fn unrecognized_keys_ignored() {
         // "Injected: header" doesn't match TO/FROM/SUBJECT/TEMPLATE/VARS/SCHEDULE
-        let body = "TO: user@example.com\nFROM: admin@sacred.vote\nSUBJECT: Test\nInjected: header\n---\n";
+        let body =
+            "TO: user@example.com\nFROM: admin@sacred.vote\nSUBJECT: Test\nInjected: header\n---\n";
         let cmd = parse_command(body).unwrap();
         assert_eq!(cmd.subject, "Test");
     }
@@ -416,7 +424,8 @@ mod tests {
 
     #[test]
     fn vars_handles_whitespace() {
-        let body = "TO: u@e.com\nFROM: a@s.vote\nSUBJECT: V\nVARS:  key1 = val1 , key2 = val2 \n---\n";
+        let body =
+            "TO: u@e.com\nFROM: a@s.vote\nSUBJECT: V\nVARS:  key1 = val1 , key2 = val2 \n---\n";
         let cmd = parse_command(body).unwrap();
         assert_eq!(cmd.vars.get("key1").unwrap(), "val1");
         assert_eq!(cmd.vars.get("key2").unwrap(), "val2");

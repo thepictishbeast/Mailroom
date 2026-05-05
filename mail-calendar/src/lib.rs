@@ -53,8 +53,8 @@ pub mod item;
 pub mod merge;
 
 pub use ics::{parse_ics, write_ics, IcsError};
-pub use merge::{merge_by_uid, MergeOutcome, MergeReport};
 pub use item::{
     CalendarAlarm, CalendarEvent, CalendarItem, CalendarTodo, EventClass, EventStatus, Person,
     Reminder, TodoStatus,
 };
+pub use merge::{merge_by_uid, MergeOutcome, MergeReport};

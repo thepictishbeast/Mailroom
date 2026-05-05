@@ -187,18 +187,20 @@ impl TemplateRenderer {
                     eyebrow: "Sender".into(),
                     title: original_from.to_string(),
                     subtitle: Some(format!("Sent {original_date}")),
-                    body: GroupBody::Fields { fields: vec![
-                        Field {
-                            label: "Mailbox".into(),
-                            value: mailbox.to_string(),
-                            mono: true,
-                        },
-                        Field {
-                            label: "Priority".into(),
-                            value: priority.to_string(),
-                            mono: false,
-                        },
-                    ] },
+                    body: GroupBody::Fields {
+                        fields: vec![
+                            Field {
+                                label: "Mailbox".into(),
+                                value: mailbox.to_string(),
+                                mono: true,
+                            },
+                            Field {
+                                label: "Priority".into(),
+                                value: priority.to_string(),
+                                mono: false,
+                            },
+                        ],
+                    },
                     how_to: None,
                 }),
                 Block::Paragraph {

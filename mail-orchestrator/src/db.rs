@@ -33,7 +33,9 @@ impl Database {
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
         let schema = include_str!("../../migrations/001_initial.sql");
         conn.execute_batch(schema)?;
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
     }
 
     /// Log an email event.
@@ -87,7 +89,12 @@ impl Database {
     }
 
     /// Update notification status.
-    pub fn update_notification_status(&self, id: i64, status: &str, error: Option<&str>) -> Result<()> {
+    pub fn update_notification_status(
+        &self,
+        id: i64,
+        status: &str,
+        error: Option<&str>,
+    ) -> Result<()> {
         let conn = self.lock_conn()?;
         conn.execute(
             "UPDATE notification_log SET status = ?1, error_message = ?2, sent_at = datetime('now') WHERE id = ?3",

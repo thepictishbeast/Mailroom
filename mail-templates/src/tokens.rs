@@ -91,9 +91,9 @@ impl Theme {
     #[must_use]
     pub fn sacredvote() -> Self {
         Self {
-            brand_navy: "#1f2937".into(),     // slate-800
-            brand_primary: "#b91c1c".into(),  // red-700
-            brand_accent: "#ef4444".into(),   // red-500
+            brand_navy: "#1f2937".into(),    // slate-800
+            brand_primary: "#b91c1c".into(), // red-700
+            brand_accent: "#ef4444".into(),  // red-500
             text_heading: "#111827".into(),
             text_body: "#374151".into(),
             text_muted: "#6b7280".into(),

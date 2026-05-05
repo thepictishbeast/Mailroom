@@ -25,24 +25,20 @@ if true {{
                 domain = domain
             )
         }
-        MailboxKind::Service => {
-            r#"require ["fileinto", "mailbox"];
+        MailboxKind::Service => r#"require ["fileinto", "mailbox"];
 # Service mailbox: file all inbound into service-specific folder.
 if true {
     fileinto :create "Service";
 }
 "#
-            .to_string()
-        }
-        MailboxKind::Router => {
-            r#"require ["fileinto", "mailbox"];
+        .to_string(),
+        MailboxKind::Router => r#"require ["fileinto", "mailbox"];
 # Router mailbox: all mail goes to processing queue.
 if true {
     fileinto :create "Processing";
 }
 "#
-            .to_string()
-        }
+        .to_string(),
         MailboxKind::User | MailboxKind::Legal => {
             format!(
                 r#"require ["fileinto", "mailbox"];

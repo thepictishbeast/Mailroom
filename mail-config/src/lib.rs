@@ -6,14 +6,14 @@
 
 #![forbid(unsafe_code)]
 
-pub mod postfix;
-pub mod dovecot;
+pub mod categories;
 pub mod dkim;
-pub mod sieve;
 pub mod domain;
+pub mod dovecot;
 pub mod error;
 pub mod mailbox_layout;
-pub mod categories;
+pub mod postfix;
+pub mod sieve;
 
 pub use categories::{Action, AuditTag, CategoryRule, CategoryRules, MatchExpr, MessageContext};
 pub use domain::{Domain, Mailbox, MailboxKind};

@@ -243,10 +243,7 @@ mod tests {
             Theme::sacredvote().brand_name
         );
         // Default (None) falls back to plausiden.
-        assert_eq!(
-            select_theme(None).brand_name,
-            Theme::plausiden().brand_name
-        );
+        assert_eq!(select_theme(None).brand_name, Theme::plausiden().brand_name);
     }
 
     #[test]

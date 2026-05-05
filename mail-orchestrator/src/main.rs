@@ -15,8 +15,8 @@ mod notifier;
 mod parser;
 mod router;
 mod scheduler;
-pub mod templates;
 mod sender;
+pub mod templates;
 mod watcher;
 
 use clap::Parser;
@@ -29,7 +29,11 @@ use tracing::{error, info};
 #[command(name = "mail-orchestrator", version, about)]
 struct Cli {
     /// Path to the orchestrator TOML config file.
-    #[arg(short, long, default_value = "/etc/mail-orchestrator/orchestrator.toml")]
+    #[arg(
+        short,
+        long,
+        default_value = "/etc/mail-orchestrator/orchestrator.toml"
+    )]
     config: PathBuf,
 
     /// Validate config and exit without starting the daemon.
@@ -64,9 +68,15 @@ async fn main() -> anyhow::Result<()> {
     if cli.check {
         info!("Configuration valid");
         info!("  Domain: {}", config.domain.name);
-        info!("  SMTP: {}:{}", config.domain.smtp_host, config.domain.smtp_port);
+        info!(
+            "  SMTP: {}:{}",
+            config.domain.smtp_host, config.domain.smtp_port
+        );
         info!("  Router maildir: {}", config.router.maildir.display());
-        info!("  Authorized senders: {:?}", config.router.authorized_senders);
+        info!(
+            "  Authorized senders: {:?}",
+            config.router.authorized_senders
+        );
         info!("  Notification mailboxes: {}", config.notify.len());
         info!("  Scheduled emails: {}", config.schedule.len());
         return Ok(());

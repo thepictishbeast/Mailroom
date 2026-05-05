@@ -203,9 +203,7 @@ mod tests {
             uid: uid.into(),
             summary: summary.into(),
             description: String::new(),
-            start: "2026-05-01T14:00:00Z"
-                .parse::<DateTime<Utc>>()
-                .unwrap(),
+            start: "2026-05-01T14:00:00Z".parse::<DateTime<Utc>>().unwrap(),
             end: "2026-05-01T15:00:00Z".parse::<DateTime<Utc>>().unwrap(),
             all_day: false,
             location: String::new(),
@@ -252,11 +250,7 @@ mod tests {
     fn merge_preserves_unmatched_existing_items() {
         // Existing has 3, incoming has 1 (matching one of them) —
         // result keeps all three, with the match updated.
-        let seed = write_ics(&[
-            evt("a@x", "A"),
-            evt("b@x", "B"),
-            evt("c@x", "C"),
-        ]);
+        let seed = write_ics(&[evt("a@x", "A"), evt("b@x", "B"), evt("c@x", "C")]);
         let r = merge_by_uid(&seed, &[evt("b@x", "B-updated")]).unwrap();
         assert_eq!(r.updated_count(), 1);
         assert!(r.ics.contains("SUMMARY:A"));
@@ -270,11 +264,7 @@ mod tests {
         let seed = write_ics(&[evt("a@x", "A")]);
         let r = merge_by_uid(
             &seed,
-            &[
-                evt("a@x", "A2"),
-                evt("b@x", "B"),
-                evt("a@x", "A3"),
-            ],
+            &[evt("a@x", "A2"), evt("b@x", "B"), evt("a@x", "A3")],
         )
         .unwrap();
         // Input is [update, add, update-again].

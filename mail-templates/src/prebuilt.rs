@@ -6,9 +6,7 @@
 //! [`crate::EmailDocument`] ready to render. Call sites stay
 //! grep-clear: `prebuilt::dns_records(...)` is unambiguous.
 
-use crate::{
-    Block, CodeBlock, Cta, EmailDocument, Field, GroupBody, GroupCard, RecordCard,
-};
+use crate::{Block, CodeBlock, Cta, EmailDocument, Field, GroupBody, GroupCard, RecordCard};
 
 /// One DNS record group (e.g., "outreach.plausiden.com — Salesman
 /// Path B"). Renders as a [`GroupCard`] with each record as a
@@ -174,23 +172,25 @@ pub fn bounce(
             eyebrow: "Failed delivery".into(),
             title: "What we tried to deliver".into(),
             subtitle: None,
-            body: GroupBody::Fields { fields: vec![
-                Field {
-                    label: "To".into(),
-                    value: failed_recipient.into(),
-                    mono: true,
-                },
-                Field {
-                    label: "Subject".into(),
-                    value: original_subject.into(),
-                    mono: false,
-                },
-                Field {
-                    label: "Server reply".into(),
-                    value: diagnostic.into(),
-                    mono: true,
-                },
-            ] },
+            body: GroupBody::Fields {
+                fields: vec![
+                    Field {
+                        label: "To".into(),
+                        value: failed_recipient.into(),
+                        mono: true,
+                    },
+                    Field {
+                        label: "Subject".into(),
+                        value: original_subject.into(),
+                        mono: false,
+                    },
+                    Field {
+                        label: "Server reply".into(),
+                        value: diagnostic.into(),
+                        mono: true,
+                    },
+                ],
+            },
             how_to: None,
         }),
         Block::Paragraph {
@@ -410,11 +410,14 @@ pub fn feedback_received(
     blocks.push(Block::Group(GroupCard {
         eyebrow: "Sender".into(),
         title: name.to_string(),
-        subtitle: Some(format!("{email}{}", if company.is_empty() {
-            String::new()
-        } else {
-            format!(" · {company}")
-        })),
+        subtitle: Some(format!(
+            "{email}{}",
+            if company.is_empty() {
+                String::new()
+            } else {
+                format!(" · {company}")
+            }
+        )),
         body: GroupBody::Fields {
             fields: vec![Field {
                 label: "Consent".into(),
@@ -543,7 +546,10 @@ pub fn inquiry_received(
 
     EmailDocument {
         subject: format!("Inquiry from {}", or_omitted(name)),
-        preheader: format!("Inquiry from {} via plausiden.com/contact", or_omitted(name)),
+        preheader: format!(
+            "Inquiry from {} via plausiden.com/contact",
+            or_omitted(name)
+        ),
         eyebrow: Some("New inquiry".into()),
         heading: "New encrypted inquiry".into(),
         intro: Some("Submitted via the public form at plausiden.com/contact.".into()),
@@ -657,11 +663,7 @@ pub fn shipping_notification(
 
     EmailDocument {
         subject: format!("[{carrier}] {heading}"),
-        preheader: format!(
-            "{} · tracking {}",
-            status.eyebrow(),
-            tracking_number
-        ),
+        preheader: format!("{} · tracking {}", status.eyebrow(), tracking_number),
         eyebrow: Some(status.eyebrow().into()),
         heading,
         intro: None,
@@ -850,11 +852,13 @@ pub fn magic_link(link: &str) -> EmailDocument {
             eyebrow: "Fallback".into(),
             title: "If the button doesn't work".into(),
             subtitle: Some("Paste this URL directly into your browser.".into()),
-            body: GroupBody::Fields { fields: vec![Field {
-                label: "URL".into(),
-                value: link.into(),
-                mono: true,
-            }] },
+            body: GroupBody::Fields {
+                fields: vec![Field {
+                    label: "URL".into(),
+                    value: link.into(),
+                    mono: true,
+                }],
+            },
             how_to: None,
         }),
         Block::Paragraph {
@@ -961,13 +965,7 @@ mod tests {
 
     #[test]
     fn shipping_exception_includes_diagnostic_paragraph() {
-        let doc = shipping_notification(
-            "FedEx",
-            "FX12345",
-            ShipmentStatus::Exception,
-            None,
-            None,
-        );
+        let doc = shipping_notification("FedEx", "FX12345", ShipmentStatus::Exception, None, None);
         let html = doc.render_html();
         assert!(html.contains("Exception · action needed"));
         assert!(html.contains("delivery exception"));
@@ -977,13 +975,7 @@ mod tests {
 
     #[test]
     fn shipping_delivered_omits_eta_when_not_provided() {
-        let doc = shipping_notification(
-            "USPS",
-            "9405...",
-            ShipmentStatus::Delivered,
-            None,
-            None,
-        );
+        let doc = shipping_notification("USPS", "9405...", ShipmentStatus::Delivered, None, None);
         let html = doc.render_html();
         assert!(html.contains("Delivered"));
         assert!(!html.contains("Expected"));

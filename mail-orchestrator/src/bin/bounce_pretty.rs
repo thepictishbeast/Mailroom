@@ -66,7 +66,9 @@ fn rewrite_bounce(raw: &[u8]) -> Option<Vec<u8>> {
     let mut rfc822_block: Option<Vec<u8>> = None;
 
     for part in msg.parts.iter() {
-        let part_ct = part_content_type(part).unwrap_or_default().to_ascii_lowercase();
+        let part_ct = part_content_type(part)
+            .unwrap_or_default()
+            .to_ascii_lowercase();
 
         let body = part_body_bytes(raw, part);
 
@@ -275,7 +277,11 @@ fn emit_multipart_report(
         }
         // header_raw returns the value with the trailing CRLF; strip
         // and re-add a clean LF for line-ending consistency.
-        let _ = writeln!(out, "{trimmed_name}:{}", value.trim_end_matches(['\r', '\n']));
+        let _ = writeln!(
+            out,
+            "{trimmed_name}:{}",
+            value.trim_end_matches(['\r', '\n'])
+        );
     }
     let _ = writeln!(
         out,

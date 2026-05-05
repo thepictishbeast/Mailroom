@@ -39,7 +39,13 @@ fn process_due_emails(db: &Database, sender: &Sender) -> Result<usize> {
     let count = due.len();
 
     for email in due {
-        match sender.send_email(&email.from_addr, None, &email.to_addr, &email.subject, &email.body) {
+        match sender.send_email(
+            &email.from_addr,
+            None,
+            &email.to_addr,
+            &email.subject,
+            &email.body,
+        ) {
             Ok(_) => {
                 if email.is_recurring {
                     if let Some(ref cron_expr) = email.cron_expr {
@@ -95,9 +101,7 @@ fn next_cron_time(cron_expr: &str) -> Option<String> {
     };
 
     match Schedule::from_str(&padded) {
-        Ok(schedule) => {
-            schedule.upcoming(Utc).next().map(|dt| dt.to_rfc3339())
-        }
+        Ok(schedule) => schedule.upcoming(Utc).next().map(|dt| dt.to_rfc3339()),
         Err(e) => {
             warn!(cron = %cron_expr, error = %e, "Invalid cron expression");
             None

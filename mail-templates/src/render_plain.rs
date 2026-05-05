@@ -19,7 +19,11 @@ pub(crate) fn render(doc: &EmailDocument) -> String {
         let _ = writeln!(out, "[{}]", eyebrow);
     }
     let _ = writeln!(out, "{}", doc.heading);
-    let _ = writeln!(out, "{}", &RULE_HEAVY[..doc.heading.chars().count().clamp(8, 60)]);
+    let _ = writeln!(
+        out,
+        "{}",
+        &RULE_HEAVY[..doc.heading.chars().count().clamp(8, 60)]
+    );
     out.push('\n');
 
     if let Some(intro) = &doc.intro {
@@ -67,7 +71,11 @@ fn render_group(g: &GroupCard, out: &mut String) {
             let _ = writeln!(out, "  {}", line);
         }
     }
-    let _ = writeln!(out, "{}", &RULE_LIGHT[..(g.title.chars().count() + g.eyebrow.chars().count() + 3).clamp(8, 60)]);
+    let _ = writeln!(
+        out,
+        "{}",
+        &RULE_LIGHT[..(g.title.chars().count() + g.eyebrow.chars().count() + 3).clamp(8, 60)]
+    );
 
     match &g.body {
         GroupBody::Fields { fields } => {

@@ -98,11 +98,9 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
                 let v = iter
                     .next()
                     .ok_or_else(|| "--severity requires a value".to_string())?;
-                severity = Some(
-                    parse_severity(v).ok_or_else(|| {
-                        format!("--severity must be critical|warning|info, got {v:?}")
-                    })?,
-                );
+                severity = Some(parse_severity(v).ok_or_else(|| {
+                    format!("--severity must be critical|warning|info, got {v:?}")
+                })?);
             }
             "--title" => {
                 title = Some(
@@ -121,9 +119,10 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
                 let v = iter
                     .next()
                     .ok_or_else(|| "--field requires a NAME=VALUE arg".to_string())?;
-                fields.push(parse_field(v).ok_or_else(|| {
-                    format!("--field expects NAME=VALUE, got {v:?}")
-                })?);
+                fields.push(
+                    parse_field(v)
+                        .ok_or_else(|| format!("--field expects NAME=VALUE, got {v:?}"))?,
+                );
             }
             "--runbook" => {
                 runbook = Some(
@@ -305,9 +304,18 @@ mod tests {
 
     #[test]
     fn parse_severity_accepts_aliases() {
-        assert!(matches!(parse_severity("critical"), Some(AlertSeverity::Critical)));
-        assert!(matches!(parse_severity("CRIT"), Some(AlertSeverity::Critical)));
-        assert!(matches!(parse_severity("warn"), Some(AlertSeverity::Warning)));
+        assert!(matches!(
+            parse_severity("critical"),
+            Some(AlertSeverity::Critical)
+        ));
+        assert!(matches!(
+            parse_severity("CRIT"),
+            Some(AlertSeverity::Critical)
+        ));
+        assert!(matches!(
+            parse_severity("warn"),
+            Some(AlertSeverity::Warning)
+        ));
         assert!(matches!(parse_severity("info"), Some(AlertSeverity::Info)));
         assert!(parse_severity("nonsense").is_none());
     }

@@ -28,7 +28,8 @@ fn schema_creates_all_tables() {
 #[test]
 fn email_log_insert_and_query() {
     let conn = rusqlite::Connection::open_in_memory().unwrap();
-    conn.execute_batch(include_str!("../../migrations/001_initial.sql")).unwrap();
+    conn.execute_batch(include_str!("../../migrations/001_initial.sql"))
+        .unwrap();
 
     conn.execute(
         "INSERT INTO email_log (message_id, tracking_id, direction, from_addr, to_addr, subject, mailbox, status)
@@ -53,7 +54,8 @@ fn email_log_insert_and_query() {
 #[test]
 fn email_log_direction_constraint() {
     let conn = rusqlite::Connection::open_in_memory().unwrap();
-    conn.execute_batch(include_str!("../../migrations/001_initial.sql")).unwrap();
+    conn.execute_batch(include_str!("../../migrations/001_initial.sql"))
+        .unwrap();
 
     let result = conn.execute(
         "INSERT INTO email_log (message_id, tracking_id, direction, from_addr, to_addr, mailbox, status)
@@ -66,7 +68,8 @@ fn email_log_direction_constraint() {
 #[test]
 fn scheduled_email_lifecycle() {
     let conn = rusqlite::Connection::open_in_memory().unwrap();
-    conn.execute_batch(include_str!("../../migrations/001_initial.sql")).unwrap();
+    conn.execute_batch(include_str!("../../migrations/001_initial.sql"))
+        .unwrap();
 
     // Insert a scheduled email
     conn.execute(
@@ -77,7 +80,11 @@ fn scheduled_email_lifecycle() {
 
     // Verify it shows as pending
     let status: String = conn
-        .query_row("SELECT status FROM scheduled_emails WHERE tracking_id = 'trk-sched'", [], |r| r.get(0))
+        .query_row(
+            "SELECT status FROM scheduled_emails WHERE tracking_id = 'trk-sched'",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
     assert_eq!(status, "pending");
 
@@ -88,7 +95,11 @@ fn scheduled_email_lifecycle() {
     ).unwrap();
 
     let status: String = conn
-        .query_row("SELECT status FROM scheduled_emails WHERE tracking_id = 'trk-sched'", [], |r| r.get(0))
+        .query_row(
+            "SELECT status FROM scheduled_emails WHERE tracking_id = 'trk-sched'",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
     assert_eq!(status, "sent");
 }
@@ -96,7 +107,8 @@ fn scheduled_email_lifecycle() {
 #[test]
 fn notification_log_insert() {
     let conn = rusqlite::Connection::open_in_memory().unwrap();
-    conn.execute_batch(include_str!("../../migrations/001_initial.sql")).unwrap();
+    conn.execute_batch(include_str!("../../migrations/001_initial.sql"))
+        .unwrap();
 
     conn.execute(
         "INSERT INTO notification_log (source_mailbox, source_message_id, subscriber, priority, status)
@@ -122,10 +134,13 @@ fn schema_is_idempotent() {
 #[test]
 fn indexes_exist() {
     let conn = rusqlite::Connection::open_in_memory().unwrap();
-    conn.execute_batch(include_str!("../../migrations/001_initial.sql")).unwrap();
+    conn.execute_batch(include_str!("../../migrations/001_initial.sql"))
+        .unwrap();
 
     let indexes: Vec<String> = conn
-        .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%' ORDER BY name")
+        .prepare(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%' ORDER BY name",
+        )
         .unwrap()
         .query_map([], |row| row.get(0))
         .unwrap()

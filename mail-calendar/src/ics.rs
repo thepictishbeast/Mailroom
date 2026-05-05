@@ -167,9 +167,7 @@ fn parse_component(lines: &[&str], start: usize) -> Result<(Component, usize), I
     })?;
     let name = begin_line
         .strip_prefix("BEGIN:")
-        .ok_or_else(|| {
-            IcsError::Malformed(format!("expected BEGIN:, found `{begin_line}`"))
-        })?
+        .ok_or_else(|| IcsError::Malformed(format!("expected BEGIN:, found `{begin_line}`")))?
         .trim()
         .to_string();
     let end_marker = format!("END:{name}");
@@ -194,7 +192,10 @@ fn parse_component(lines: &[&str], start: usize) -> Result<(Component, usize), I
             // RFC 5545 ATTENDEE/COMMENT/etc. can repeat. Keep
             // multi-valued properties in `multi`; everything else
             // is single-valued (last-write-wins).
-            if matches!(prop_key.as_str(), "ATTENDEE" | "COMMENT" | "CATEGORIES" | "RELATED-TO") {
+            if matches!(
+                prop_key.as_str(),
+                "ATTENDEE" | "COMMENT" | "CATEGORIES" | "RELATED-TO"
+            ) {
                 comp.multi.push((prop_key, prop));
             } else {
                 comp.props.insert(prop_key, prop);
@@ -347,10 +348,7 @@ fn parse_todo(c: &Component) -> Result<CalendarTodo, IcsError> {
     })
 }
 
-fn parse_nested_alarm(
-    c: &Component,
-    anchor: DateTime<Utc>,
-) -> Result<Option<Reminder>, IcsError> {
+fn parse_nested_alarm(c: &Component, anchor: DateTime<Utc>) -> Result<Option<Reminder>, IcsError> {
     let Some(trigger_raw) = c.prop_value("TRIGGER") else {
         return Ok(None);
     };
@@ -406,7 +404,8 @@ fn parse_datetime(raw: &str, field: &'static str) -> Result<(DateTime<Utc>, bool
     Err(IcsError::BadDateTime {
         field,
         value: s.to_string(),
-        reason: "unrecognized format (expected YYYYMMDDTHHMMSSZ, YYYYMMDDTHHMMSS, or YYYYMMDD)".into(),
+        reason: "unrecognized format (expected YYYYMMDDTHHMMSSZ, YYYYMMDDTHHMMSS, or YYYYMMDD)"
+            .into(),
     })
 }
 
@@ -414,11 +413,13 @@ fn parse_datetime(raw: &str, field: &'static str) -> Result<(DateTime<Utc>, bool
 fn resolve_relative_trigger(raw: &str, anchor: DateTime<Utc>) -> Result<DateTime<Utc>, IcsError> {
     let s = raw.trim();
     let (sign, body) = s.strip_prefix('-').map_or((1i64, s), |rest| (-1i64, rest));
-    let body = body.strip_prefix("PT").ok_or_else(|| IcsError::BadDateTime {
-        field: "TRIGGER",
-        value: raw.to_string(),
-        reason: "expected PT-prefixed duration".into(),
-    })?;
+    let body = body
+        .strip_prefix("PT")
+        .ok_or_else(|| IcsError::BadDateTime {
+            field: "TRIGGER",
+            value: raw.to_string(),
+            reason: "expected PT-prefixed duration".into(),
+        })?;
     let mut total_seconds: i64 = 0;
     let mut buf = String::new();
     for c in body.chars() {
@@ -533,11 +534,7 @@ fn write_event(e: &CalendarEvent, now: DateTime<Utc>, out: &mut String) {
             "DTSTART;VALUE=DATE",
             &e.start.format("%Y%m%d").to_string(),
         );
-        write_line_raw(
-            out,
-            "DTEND;VALUE=DATE",
-            &e.end.format("%Y%m%d").to_string(),
-        );
+        write_line_raw(out, "DTEND;VALUE=DATE", &e.end.format("%Y%m%d").to_string());
     } else {
         write_line_raw(out, "DTSTART", &fmt_datetime_z(e.start));
         write_line_raw(out, "DTEND", &fmt_datetime_z(e.end));
@@ -809,7 +806,13 @@ END:VCALENDAR\r\n";
     fn missing_uid_rejected() {
         let bad = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART:20260501T143000Z\r\nDTEND:20260501T153000Z\r\nSUMMARY:no uid\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
         let err = parse_ics(bad).unwrap_err();
-        assert!(matches!(err, IcsError::MissingProperty { property: "UID", .. }));
+        assert!(matches!(
+            err,
+            IcsError::MissingProperty {
+                property: "UID",
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -829,14 +832,20 @@ END:VCALENDAR\r\n";
     #[test]
     fn parse_datetime_utc() {
         let (dt, all_day) = parse_datetime("20260501T143000Z", "DTSTART").unwrap();
-        assert_eq!(dt.format("%Y-%m-%d %H:%M:%S").to_string(), "2026-05-01 14:30:00");
+        assert_eq!(
+            dt.format("%Y-%m-%d %H:%M:%S").to_string(),
+            "2026-05-01 14:30:00"
+        );
         assert!(!all_day);
     }
 
     #[test]
     fn parse_datetime_floating() {
         let (dt, all_day) = parse_datetime("20260501T143000", "DTSTART").unwrap();
-        assert_eq!(dt.format("%Y-%m-%d %H:%M:%S").to_string(), "2026-05-01 14:30:00");
+        assert_eq!(
+            dt.format("%Y-%m-%d %H:%M:%S").to_string(),
+            "2026-05-01 14:30:00"
+        );
         assert!(!all_day);
     }
 
@@ -987,7 +996,10 @@ END:VCALENDAR\r\n";
         assert_eq!(round_tripped.organizer, original.organizer);
         assert_eq!(round_tripped.attendees, original.attendees);
         assert_eq!(round_tripped.reminders.len(), original.reminders.len());
-        assert_eq!(round_tripped.reminders[0].trigger, original.reminders[0].trigger);
+        assert_eq!(
+            round_tripped.reminders[0].trigger,
+            original.reminders[0].trigger
+        );
     }
 
     #[test]

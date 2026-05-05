@@ -248,10 +248,7 @@ pub struct MessageContext<'a> {
 }
 
 impl<'a> MessageContext<'a> {
-    fn header_values<'b>(
-        &'b self,
-        name_lower: &'b str,
-    ) -> impl Iterator<Item = &'b str> + 'b {
+    fn header_values<'b>(&'b self, name_lower: &'b str) -> impl Iterator<Item = &'b str> + 'b {
         self.headers
             .iter()
             .filter(move |(k, _)| k == name_lower)
@@ -343,10 +340,7 @@ fn emit_action(action: &Action, out: &mut String, indent: &str) {
             ));
         }
         Action::SetFlag { flag } => {
-            out.push_str(&format!(
-                "{indent}addflag \"{}\";\n",
-                sieve_escape(flag)
-            ));
+            out.push_str(&format!("{indent}addflag \"{}\";\n", sieve_escape(flag)));
         }
         Action::Sequence { actions } => {
             for a in actions {
@@ -896,7 +890,9 @@ fn rule_promotions_listunsub() -> CategoryRule {
         // now matches multiple bulk-marketing markers, not just
         // List-Unsubscribe.
         id: "promotions_listunsub".into(),
-        display_name: "Promotions — bulk-mail markers (List-Unsubscribe / X-Mailer / X-Campaign / Precedence)".into(),
+        display_name:
+            "Promotions — bulk-mail markers (List-Unsubscribe / X-Mailer / X-Campaign / Precedence)"
+                .into(),
         when: MatchExpr::Any {
             exprs: vec![
                 MatchExpr::HasHeader {
@@ -1149,7 +1145,8 @@ fn rule_forums_dev_communities() -> CategoryRule {
 fn rule_forums_googlegroups() -> CategoryRule {
     CategoryRule {
         id: "forums_googlegroups".into(),
-        display_name: "Forums — list-server domains (Google Groups, groups.io, Yahoo Groups)".into(),
+        display_name: "Forums — list-server domains (Google Groups, groups.io, Yahoo Groups)"
+            .into(),
         when: MatchExpr::FromDomainIn {
             domains: vec![
                 "@googlegroups.com".into(),
@@ -1329,8 +1326,15 @@ mod tests {
     #[test]
     fn github_with_list_unsubscribe_still_routes_to_updates() {
         let rules = CategoryRules::default();
-        let h = vec![("list-unsubscribe".into(), "<mailto:unsub@github.com>".into())];
-        let hits = rules.evaluate(&ctx(&h, "notifications@github.com", "[repo] Run failed: ci"));
+        let h = vec![(
+            "list-unsubscribe".into(),
+            "<mailto:unsub@github.com>".into(),
+        )];
+        let hits = rules.evaluate(&ctx(
+            &h,
+            "notifications@github.com",
+            "[repo] Run failed: ci",
+        ));
         let first = hits.first().expect("a rule fires");
         assert_eq!(
             first.id, "updates_senders",
@@ -1348,7 +1352,10 @@ mod tests {
     #[test]
     fn stripe_receipt_with_list_unsubscribe_routes_to_receipts() {
         let rules = CategoryRules::default();
-        let h = vec![("list-unsubscribe".into(), "<mailto:unsub@stripe.com>".into())];
+        let h = vec![(
+            "list-unsubscribe".into(),
+            "<mailto:unsub@stripe.com>".into(),
+        )];
         let hits = rules.evaluate(&ctx(&h, "receipts@stripe.com", "Your receipt from Stripe"));
         assert_eq!(hits.first().unwrap().id, "receipts");
     }
@@ -1358,15 +1365,25 @@ mod tests {
     #[test]
     fn facebook_notification_with_list_unsubscribe_routes_to_social() {
         let rules = CategoryRules::default();
-        let h = vec![("list-unsubscribe".into(), "<mailto:u@facebookmail.com>".into())];
-        let hits = rules.evaluate(&ctx(&h, "friendsuggestion@facebookmail.com", "Friend suggestions"));
+        let h = vec![(
+            "list-unsubscribe".into(),
+            "<mailto:u@facebookmail.com>".into(),
+        )];
+        let hits = rules.evaluate(&ctx(
+            &h,
+            "friendsuggestion@facebookmail.com",
+            "Friend suggestions",
+        ));
         assert_eq!(hits.first().unwrap().id, "social_senders");
     }
 
     #[test]
     fn instagram_subdomain_with_list_unsubscribe_routes_to_social() {
         let rules = CategoryRules::default();
-        let h = vec![("list-unsubscribe".into(), "<mailto:u@mail.instagram.com>".into())];
+        let h = vec![(
+            "list-unsubscribe".into(),
+            "<mailto:u@mail.instagram.com>".into(),
+        )];
         let hits = rules.evaluate(&ctx(&h, "follow@mail.instagram.com", "New followers"));
         assert_eq!(hits.first().unwrap().id, "social_senders");
     }
@@ -1466,7 +1483,11 @@ mod tests {
     fn linkedin_routes_to_social() {
         let rules = CategoryRules::default();
         let h = vec![];
-        let hits = rules.evaluate(&ctx(&h, "invitations@linkedin.com", "John wants to connect"));
+        let hits = rules.evaluate(&ctx(
+            &h,
+            "invitations@linkedin.com",
+            "John wants to connect",
+        ));
         assert_eq!(hits.first().unwrap().id, "social_senders");
     }
 
@@ -1485,7 +1506,11 @@ mod tests {
     fn security_alert_subject_routes_to_important() {
         let rules = CategoryRules::default();
         let h = vec![];
-        let hits = rules.evaluate(&ctx(&h, "noreply@accounts.google.com", "Security alert: new sign-in on Linux"));
+        let hits = rules.evaluate(&ctx(
+            &h,
+            "noreply@accounts.google.com",
+            "Security alert: new sign-in on Linux",
+        ));
         let first = hits.first().expect("a rule fires");
         assert_eq!(first.id, "important_security");
         // important_security must beat updates_senders (which @google.com would otherwise hit).
@@ -1495,7 +1520,11 @@ mod tests {
     fn docusign_routes_to_important() {
         let rules = CategoryRules::default();
         let h = vec![];
-        let hits = rules.evaluate(&ctx(&h, "dse@docusign.net", "Please sign: Master Services Agreement"));
+        let hits = rules.evaluate(&ctx(
+            &h,
+            "dse@docusign.net",
+            "Please sign: Master Services Agreement",
+        ));
         assert_eq!(hits.first().unwrap().id, "important_signature");
     }
 
@@ -1503,7 +1532,11 @@ mod tests {
     fn chase_statement_routes_to_banking() {
         let rules = CategoryRules::default();
         let h = vec![];
-        let hits = rules.evaluate(&ctx(&h, "alerts@chase.com", "Your December statement is ready"));
+        let hits = rules.evaluate(&ctx(
+            &h,
+            "alerts@chase.com",
+            "Your December statement is ready",
+        ));
         assert_eq!(hits.first().unwrap().id, "banking");
     }
 
@@ -1519,7 +1552,11 @@ mod tests {
     fn amex_charge_alert_routes_to_banking() {
         let rules = CategoryRules::default();
         let h = vec![];
-        let hits = rules.evaluate(&ctx(&h, "alerts@americanexpress.com", "Large purchase notification"));
+        let hits = rules.evaluate(&ctx(
+            &h,
+            "alerts@americanexpress.com",
+            "Large purchase notification",
+        ));
         assert_eq!(hits.first().unwrap().id, "banking");
     }
 
@@ -1529,7 +1566,11 @@ mod tests {
         // bank account" must page, not be filed quietly into Banking.
         let rules = CategoryRules::default();
         let h = vec![];
-        let hits = rules.evaluate(&ctx(&h, "alerts@chase.com", "New sign-in detected on your Chase account"));
+        let hits = rules.evaluate(&ctx(
+            &h,
+            "alerts@chase.com",
+            "New sign-in detected on your Chase account",
+        ));
         assert_eq!(hits.first().unwrap().id, "important_security");
     }
 
@@ -1539,7 +1580,11 @@ mod tests {
         // declined" must page.
         let rules = CategoryRules::default();
         let h = vec![];
-        let hits = rules.evaluate(&ctx(&h, "alerts@chase.com", "Action required: card declined"));
+        let hits = rules.evaluate(&ctx(
+            &h,
+            "alerts@chase.com",
+            "Action required: card declined",
+        ));
         assert_eq!(hits.first().unwrap().id, "important_billing_critical");
     }
 
@@ -1550,7 +1595,11 @@ mod tests {
         // is the more specific signal.
         let rules = CategoryRules::default();
         let h = vec![];
-        let hits = rules.evaluate(&ctx(&h, "no-reply@chase.com", "Your receipt for the $50 transfer"));
+        let hits = rules.evaluate(&ctx(
+            &h,
+            "no-reply@chase.com",
+            "Your receipt for the $50 transfer",
+        ));
         assert_eq!(hits.first().unwrap().id, "receipts");
     }
 
@@ -1558,7 +1607,11 @@ mod tests {
     fn united_flight_confirmation_routes_to_travel() {
         let rules = CategoryRules::default();
         let h = vec![];
-        let hits = rules.evaluate(&ctx(&h, "no-reply@united.com", "Your flight on May 12 to LAX"));
+        let hits = rules.evaluate(&ctx(
+            &h,
+            "no-reply@united.com",
+            "Your flight on May 12 to LAX",
+        ));
         assert_eq!(hits.first().unwrap().id, "travel");
     }
 
@@ -1566,7 +1619,11 @@ mod tests {
     fn marriott_reservation_routes_to_travel() {
         let rules = CategoryRules::default();
         let h = vec![("list-unsubscribe".into(), "<mailto:u@marriott.com>".into())];
-        let hits = rules.evaluate(&ctx(&h, "reservations@marriott.com", "Confirmation 12345 — see you May 14"));
+        let hits = rules.evaluate(&ctx(
+            &h,
+            "reservations@marriott.com",
+            "Confirmation 12345 — see you May 14",
+        ));
         assert_eq!(hits.first().unwrap().id, "travel");
     }
 
@@ -1585,7 +1642,11 @@ mod tests {
         // sensible — but receipt-shape wins on score.
         let rules = CategoryRules::default();
         let h = vec![];
-        let hits = rules.evaluate(&ctx(&h, "receipts@united.com", "Your receipt from United Airlines — $429.50"));
+        let hits = rules.evaluate(&ctx(
+            &h,
+            "receipts@united.com",
+            "Your receipt from United Airlines — $429.50",
+        ));
         assert_eq!(hits.first().unwrap().id, "receipts");
     }
 
@@ -1595,7 +1656,11 @@ mod tests {
         // not be filed quietly into Travel (86).
         let rules = CategoryRules::default();
         let h = vec![];
-        let hits = rules.evaluate(&ctx(&h, "alerts@united.com", "Action required: your flight has been canceled"));
+        let hits = rules.evaluate(&ctx(
+            &h,
+            "alerts@united.com",
+            "Action required: your flight has been canceled",
+        ));
         assert_eq!(hits.first().unwrap().id, "important_billing_critical");
     }
 
@@ -1603,9 +1668,16 @@ mod tests {
     fn stripe_receipt_routes_to_receipts_folder() {
         let rules = CategoryRules::default();
         let h = vec![("list-unsubscribe".into(), "<mailto:u@stripe.com>".into())];
-        let hits = rules.evaluate(&ctx(&h, "receipts@stripe.com", "Your receipt from Stripe — $14.00"));
+        let hits = rules.evaluate(&ctx(
+            &h,
+            "receipts@stripe.com",
+            "Your receipt from Stripe — $14.00",
+        ));
         let first = hits.first().expect("a rule fires");
-        assert_eq!(first.id, "receipts", "Stripe receipt should hit receipts rule first");
+        assert_eq!(
+            first.id, "receipts",
+            "Stripe receipt should hit receipts rule first"
+        );
         assert_eq!(
             first.action,
             Action::FileInto {
@@ -1630,7 +1702,10 @@ mod tests {
         let h = vec![];
         let hits = rules.evaluate(&ctx(&h, "orders@shopify.com", "Your order has shipped"));
         let first = hits.first().expect("a rule fires");
-        assert_eq!(first.id, "receipts", "order confirmations belong in Receipts");
+        assert_eq!(
+            first.id, "receipts",
+            "order confirmations belong in Receipts"
+        );
     }
 
     #[test]
@@ -1639,7 +1714,11 @@ mod tests {
         // the receipts rule (87) and hit important_billing_critical (89).
         let rules = CategoryRules::default();
         let h = vec![];
-        let hits = rules.evaluate(&ctx(&h, "billing@stripe.com", "Action required: payment failed"));
+        let hits = rules.evaluate(&ctx(
+            &h,
+            "billing@stripe.com",
+            "Action required: payment failed",
+        ));
         let first = hits.first().expect("a rule fires");
         assert_eq!(
             first.id, "important_billing_critical",
@@ -1660,7 +1739,11 @@ mod tests {
     fn billing_failure_routes_to_important() {
         let rules = CategoryRules::default();
         let h = vec![];
-        let hits = rules.evaluate(&ctx(&h, "billing@stripe.com", "Action required: payment failed"));
+        let hits = rules.evaluate(&ctx(
+            &h,
+            "billing@stripe.com",
+            "Action required: payment failed",
+        ));
         // Beats updates_senders(@stripe.com, 85) because important_billing_critical is 89.
         assert_eq!(hits.first().unwrap().id, "important_billing_critical");
     }
@@ -1673,7 +1756,11 @@ mod tests {
         // failure-shaped subject).
         let rules = CategoryRules::default();
         let h = vec![("list-unsubscribe".into(), "<mailto:u@stripe.com>".into())];
-        let hits = rules.evaluate(&ctx(&h, "receipts@stripe.com", "Your receipt from Stripe — $14.00"));
+        let hits = rules.evaluate(&ctx(
+            &h,
+            "receipts@stripe.com",
+            "Your receipt from Stripe — $14.00",
+        ));
         let first = hits.first().unwrap();
         assert_eq!(first.id, "receipts");
         assert_ne!(first.id, "important_billing_critical");
@@ -1686,7 +1773,11 @@ mod tests {
         // not synthesize a From header from from_address).
         let rules = CategoryRules::default();
         let h = vec![("from".into(), "noreply@discourse.example.org".into())];
-        let hits = rules.evaluate(&ctx(&h, "noreply@discourse.example.org", "[Discussion] new topic"));
+        let hits = rules.evaluate(&ctx(
+            &h,
+            "noreply@discourse.example.org",
+            "[Discussion] new topic",
+        ));
         assert_eq!(hits.first().unwrap().id, "forums_discourse_subdomain");
     }
 
@@ -1694,7 +1785,11 @@ mod tests {
     fn rust_users_forum_routes_to_forums_not_updates() {
         let rules = CategoryRules::default();
         let h = vec![];
-        let hits = rules.evaluate(&ctx(&h, "noreply@users.rust-lang.org", "Re: trait object lifetimes"));
+        let hits = rules.evaluate(&ctx(
+            &h,
+            "noreply@users.rust-lang.org",
+            "Re: trait object lifetimes",
+        ));
         // forums_dev_communities (86) beats updates_senders (85) and listunsub (80).
         assert_eq!(hits.first().unwrap().id, "forums_dev_communities");
     }
@@ -1703,7 +1798,11 @@ mod tests {
     fn stackexchange_routes_to_forums() {
         let rules = CategoryRules::default();
         let h = vec![];
-        let hits = rules.evaluate(&ctx(&h, "do-not-reply@stackexchange.com", "Your weekly digest"));
+        let hits = rules.evaluate(&ctx(
+            &h,
+            "do-not-reply@stackexchange.com",
+            "Your weekly digest",
+        ));
         assert_eq!(hits.first().unwrap().id, "forums_dev_communities");
     }
 
@@ -1732,15 +1831,16 @@ mod tests {
         for ext in &["fileinto", "mailbox", "imap4flags"] {
             assert!(s.contains(ext), "missing extension {ext}");
         }
-        assert!(!s.contains("editheader"), "default must not require editheader");
+        assert!(
+            !s.contains("editheader"),
+            "default must not require editheader"
+        );
         assert!(!s.contains("addheader"), "default must not emit addheader");
     }
 
     #[test]
     fn audit_header_opt_in_requires_editheader() {
-        let s = CategoryRules::default().to_sieve_with(SieveEmitOptions {
-            audit_header: true,
-        });
+        let s = CategoryRules::default().to_sieve_with(SieveEmitOptions { audit_header: true });
         assert!(s.contains("editheader"));
         assert!(s.contains("addheader \"X-PlausiDen-Category\""));
         assert!(s.contains("id=promotions_listunsub"));
@@ -1757,7 +1857,10 @@ mod tests {
         // → forums_listid (75) → promotions_senders (70).
         assert!(imp_pos < updates_pos, "score 90 should precede score 85");
         assert!(updates_pos < promo_pos, "score 85 should precede score 80");
-        assert!(promo_pos < promo_senders_pos, "score 80 should precede score 70");
+        assert!(
+            promo_pos < promo_senders_pos,
+            "score 80 should precede score 70"
+        );
     }
 
     #[test]

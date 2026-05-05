@@ -172,7 +172,13 @@ mod tests {
         let layout = MailboxLayout::default();
         let cats = layout.category_folders();
         for expected in &[
-            "Updates", "Receipts", "Travel", "Banking", "Social", "Promotions", "Forums",
+            "Updates",
+            "Receipts",
+            "Travel",
+            "Banking",
+            "Social",
+            "Promotions",
+            "Forums",
         ] {
             assert!(cats.contains(expected), "missing category {expected}");
         }
@@ -194,7 +200,9 @@ mod tests {
         let conf = MailboxLayout::default().to_dovecot_conf();
         // `Sent Messages` exists for legacy clients but should not
         // auto-subscribe — duplicate Sent listings confuse users.
-        let sm_block_start = conf.find("\"Sent Messages\"").expect("sent messages folder");
+        let sm_block_start = conf
+            .find("\"Sent Messages\"")
+            .expect("sent messages folder");
         let next_close = conf[sm_block_start..].find("}").expect("close brace");
         let block = &conf[sm_block_start..sm_block_start + next_close];
         assert!(!block.contains("auto = subscribe"), "alias auto-subscribed");

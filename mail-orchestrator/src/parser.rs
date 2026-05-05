@@ -32,10 +32,7 @@ pub fn parse_email(path: &Path) -> Result<ParsedEmail> {
         .parse(&raw)
         .context("Failed to parse email")?;
 
-    let message_id = message
-        .message_id()
-        .unwrap_or("unknown")
-        .to_string();
+    let message_id = message.message_id().unwrap_or("unknown").to_string();
 
     let from = message
         .from()
@@ -56,34 +53,19 @@ pub fn parse_email(path: &Path) -> Result<ParsedEmail> {
         .unwrap_or_default()
         .to_string();
 
-    let subject = message
-        .subject()
-        .unwrap_or("(no subject)")
-        .to_string();
+    let subject = message.subject().unwrap_or("(no subject)").to_string();
 
-    let date = message
-        .date()
-        .map(|d| d.to_rfc3339())
-        .unwrap_or_default();
+    let date = message.date().map(|d| d.to_rfc3339()).unwrap_or_default();
 
-    let body_text = message
-        .body_text(0)
-        .unwrap_or_default()
-        .to_string();
+    let body_text = message.body_text(0).unwrap_or_default().to_string();
 
-    let body_preview = body_text
-        .chars()
-        .take(200)
-        .collect::<String>();
+    let body_preview = body_text.chars().take(200).collect::<String>();
 
     let mut attachment_names = Vec::new();
     let has_attachments = message.attachment_count() > 0;
     for i in 0..message.attachment_count() {
         if let Some(part) = message.attachment(i) {
-            let name = part
-                .attachment_name()
-                .unwrap_or("unnamed")
-                .to_string();
+            let name = part.attachment_name().unwrap_or("unnamed").to_string();
             attachment_names.push(name);
         }
     }

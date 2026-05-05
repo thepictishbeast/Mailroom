@@ -4,7 +4,7 @@
 //! and main.cf parameters. All writes go through validation before
 //! touching disk.
 
-use crate::{Domain, ConfigError, Result};
+use crate::{ConfigError, Domain, Result};
 use std::path::Path;
 
 /// Default path for the Postfix virtual mailbox map.

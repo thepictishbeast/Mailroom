@@ -18,7 +18,11 @@ use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
 /// Start watching all configured Maildir/new/ directories.
-pub async fn watch_maildirs(config: Arc<Config>, db: Arc<Database>, sender: Arc<Sender>) -> Result<()> {
+pub async fn watch_maildirs(
+    config: Arc<Config>,
+    db: Arc<Database>,
+    sender: Arc<Sender>,
+) -> Result<()> {
     let (tx, mut rx) = mpsc::channel::<(String, PathBuf)>(256);
 
     // Set up filesystem watcher
@@ -88,7 +92,11 @@ pub async fn watch_maildirs(config: Arc<Config>, db: Arc<Database>, sender: Arc<
         if !path.is_file() {
             continue;
         }
-        if path.file_name().map(|n| n.to_string_lossy().starts_with('.')).unwrap_or(true) {
+        if path
+            .file_name()
+            .map(|n| n.to_string_lossy().starts_with('.'))
+            .unwrap_or(true)
+        {
             continue;
         }
 
@@ -98,14 +106,17 @@ pub async fn watch_maildirs(config: Arc<Config>, db: Arc<Database>, sender: Arc<
             Ok(email) => {
                 if mailbox_name == "router" {
                     let router_identity = format!("router@{}", config.domain.name);
-                    if let Err(e) = router::execute_command(&email, &config.router, &sender, &db, &router_identity) {
+                    if let Err(e) = router::execute_command(
+                        &email,
+                        &config.router,
+                        &sender,
+                        &db,
+                        &router_identity,
+                    ) {
                         error!(error = %e, "Router command execution failed");
                     }
                 } else if let Some(notify_config) = config.notify.get(&mailbox_name) {
-                    let alerts_from = format!(
-                        "alerts@{}",
-                        config.domain.name
-                    );
+                    let alerts_from = format!("alerts@{}", config.domain.name);
                     if let Err(e) = notifier::notify_subscribers(
                         notify_config,
                         &email,

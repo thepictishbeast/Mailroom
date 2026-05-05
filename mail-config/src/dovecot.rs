@@ -3,7 +3,7 @@
 //! Manages the Dovecot passwd-file user database and Sieve script paths.
 //! Generates properly formatted entries for Dovecot's userdb/passdb.
 
-use crate::{Domain, ConfigError, Result};
+use crate::{ConfigError, Domain, Result};
 
 /// Default path for the Dovecot passwd-file.
 pub const PASSWD_FILE_PATH: &str = "/etc/dovecot/users";
@@ -146,7 +146,9 @@ mod tests {
 
     #[test]
     fn reject_invalid_address() {
-        assert!(generate_passwd_entry("noatsign", "hash", 5000, 5000, "/var/mail", "d", "u").is_err());
+        assert!(
+            generate_passwd_entry("noatsign", "hash", 5000, 5000, "/var/mail", "d", "u").is_err()
+        );
         assert!(generate_passwd_entry("", "hash", 5000, 5000, "/var/mail", "d", "u").is_err());
     }
 
