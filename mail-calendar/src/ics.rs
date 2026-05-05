@@ -82,7 +82,7 @@ struct Component {
     /// repeats). Order is preserved.
     multi: Vec<(String, Property)>,
     /// Nested components (VALARM inside VEVENT).
-    nested: Vec<Component>,
+    nested: Vec<Self>,
 }
 
 impl Component {
