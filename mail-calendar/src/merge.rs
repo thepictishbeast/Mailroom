@@ -113,7 +113,7 @@ pub fn merge_by_uid(
         };
         if seen_existing_uids.contains(uid) {
             // Replace the matching item in place.
-            for slot in existing.iter_mut() {
+            for slot in &mut existing {
                 if item_uid(slot) == Some(uid) {
                     *slot = inc.clone();
                     break;

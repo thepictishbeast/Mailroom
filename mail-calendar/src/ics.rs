@@ -465,9 +465,7 @@ fn unescape_text(s: &str) -> String {
     while let Some(c) = chars.next() {
         if c == '\\' {
             match chars.next() {
-                Some('\\') => out.push('\\'),
-                Some(',') => out.push(','),
-                Some(';') => out.push(';'),
+                Some(c @ ('\\' | ',' | ';')) => out.push(c),
                 Some('n' | 'N') => out.push('\n'),
                 Some(other) => {
                     out.push('\\');
@@ -622,7 +620,8 @@ fn write_cal_address(out: &mut String, prop_name: &str, p: &Person) {
         } else {
             p.name.clone()
         };
-        header.push_str(&format!(";CN={cn_value}"));
+        header.push_str(";CN=");
+        header.push_str(&cn_value);
     }
     let value = format!("mailto:{}", p.email);
     let line = format!("{header}:{value}");
