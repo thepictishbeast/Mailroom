@@ -132,7 +132,7 @@ pub fn parse_ics(ics: &str) -> Result<Vec<CalendarItem>, IcsError> {
             "VTODO" => out.push(CalendarItem::Todo(parse_todo(nested)?)),
             "VALARM" => out.push(CalendarItem::Alarm(parse_standalone_alarm(nested)?)),
             // Skip VTIMEZONE / VJOURNAL / VFREEBUSY in v0.
-            _ => continue,
+            _ => {}
         }
     }
     Ok(out)
@@ -146,9 +146,7 @@ fn unfold(input: &str) -> String {
     for line in input.split_inclusive('\n') {
         let stripped = line.strip_suffix('\n').unwrap_or(line);
         let stripped = stripped.strip_suffix('\r').unwrap_or(stripped);
-        if !first && stripped.starts_with(' ') {
-            out.push_str(&stripped[1..]);
-        } else if !first && stripped.starts_with('\t') {
+        if !first && stripped.starts_with([' ', '\t']) {
             out.push_str(&stripped[1..]);
         } else {
             if !first {

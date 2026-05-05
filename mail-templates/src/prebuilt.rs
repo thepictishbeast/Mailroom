@@ -467,9 +467,7 @@ pub fn feedback_received(
         preheader: format!("New feedback from {name} (#{row_id})"),
         eyebrow: Some(format!("Feedback · #{row_id}")),
         heading: "New feedback received".into(),
-        intro: Some(format!(
-            "Submitted via the public form at plausiden.com/feedback."
-        )),
+        intro: Some("Submitted via the public form at plausiden.com/feedback.".into()),
         blocks,
         footer_lines: vec![],
     }
