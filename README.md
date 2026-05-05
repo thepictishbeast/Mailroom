@@ -83,7 +83,7 @@ Inbound Mail                              Outbound Mail
 > **Note:** This repository is being assembled from a production deployment. Full automated setup is in progress.
 
 ```bash
-git clone https://github.com/PlausiDen/Secure-Email-Server-and-UI.git
+git clone https://github.com/thepictishbeast/Mailroom.git
 cd Secure-Email-Server-and-UI
 
 # The mail-orchestrator Rust daemon:
@@ -103,7 +103,7 @@ Secure-Email-Server-and-UI provides the email infrastructure for the PlausiDen e
 
 Related repositories:
 - [Sacred.Vote](https://github.com/thepictishbeast/Sacred.Vote) -- Voting platform that sends notifications via this email stack
-- [Shield](https://github.com/PlausiDen/Shield) -- Server admin panel with email monitoring integration
+- [Shield](https://github.com/thepictishbeast/PlausiDen-Shield) -- Server admin panel with email monitoring integration
 - [Vulnerability-Scanner](https://github.com/thepictishbeast/Vulnerability-Scanner) -- Sends vulnerability alerts via email
 
 ## License
