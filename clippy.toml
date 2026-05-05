@@ -1,0 +1,3 @@
+# Mail-stack protocol / product names that read fine as prose in
+# rustdoc without backticks. Extends rustc-default doc-valid-idents.
+doc-valid-idents = ["CalDAV", "Nextcloud", ".."]
