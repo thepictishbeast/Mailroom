@@ -102,9 +102,9 @@ cargo build --release
 Secure-Email-Server-and-UI provides the email infrastructure for the PlausiDen ecosystem. Sacred.Vote uses it for voter notifications, ballot receipts, and administrative alerts. The mail-orchestrator daemon handles notification routing across all services, ensuring that alerts from monitoring, voting deadlines, and security events reach the right people through the right mailboxes.
 
 Related repositories:
-- [Sacred.Vote](https://github.com/PlausiDen/Sacred.Vote) -- Voting platform that sends notifications via this email stack
+- [Sacred.Vote](https://github.com/thepictishbeast/Sacred.Vote) -- Voting platform that sends notifications via this email stack
 - [Shield](https://github.com/PlausiDen/Shield) -- Server admin panel with email monitoring integration
-- [Vulnerability-Scanner](https://github.com/PlausiDen/Vulnerability-Scanner) -- Sends vulnerability alerts via email
+- [Vulnerability-Scanner](https://github.com/thepictishbeast/Vulnerability-Scanner) -- Sends vulnerability alerts via email
 
 ## License
 
