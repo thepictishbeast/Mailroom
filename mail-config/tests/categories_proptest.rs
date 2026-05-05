@@ -77,7 +77,7 @@ fn arb_message() -> impl Strategy<Value = (Vec<(String, String)>, String, String
     )
 }
 
-/// Hits are deterministic across repeated evaluation.
+// Hits are deterministic across repeated evaluation.
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(64))]
     #[test]
@@ -97,7 +97,7 @@ proptest! {
     }
 }
 
-/// Hits are ordered by score descending, then id ascending.
+// Hits are ordered by score descending, then id ascending.
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(64))]
     #[test]
@@ -125,7 +125,7 @@ proptest! {
     }
 }
 
-/// `stop_on_match` truncates the hit list at the first such match.
+// `stop_on_match` truncates the hit list at the first such match.
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(64))]
     #[test]
@@ -150,7 +150,7 @@ proptest! {
     }
 }
 
-/// An empty rule set never produces a hit, regardless of the message.
+// An empty rule set never produces a hit, regardless of the message.
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(32))]
     #[test]
