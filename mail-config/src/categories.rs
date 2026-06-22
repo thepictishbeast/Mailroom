@@ -416,8 +416,19 @@ fn rule_sacredvote() -> CategoryRule {
     CategoryRule {
         id: "sacredvote".into(),
         display_name: "SacredVote mail → SacredVote".into(),
-        when: MatchExpr::FromDomainIn {
-            domains: vec!["@sacred.vote".into(), "@sacredvote.org".into()],
+        // HeaderContains (not FromDomainIn) so subdomains match too — the real
+        // mail includes admin@mail.sacred.vote, not just @sacred.vote.
+        when: MatchExpr::Any {
+            exprs: vec![
+                MatchExpr::HeaderContains {
+                    header: "From".into(),
+                    substring: "sacred.vote".into(),
+                },
+                MatchExpr::HeaderContains {
+                    header: "From".into(),
+                    substring: "sacredvote.org".into(),
+                },
+            ],
         },
         action: Action::FileInto {
             folder: "SacredVote".into(),
@@ -432,11 +443,18 @@ fn rule_hetzner() -> CategoryRule {
     CategoryRule {
         id: "hetzner".into(),
         display_name: "Hetzner mail → Hetzner".into(),
-        when: MatchExpr::FromDomainIn {
-            domains: vec![
-                "@hetzner.com".into(),
-                "@hetzner.cloud".into(),
-                "@your-server.de".into(),
+        // Real mail is all @hetzner.com (noreply/support/billing/robot/…);
+        // HeaderContains catches every hetzner.* subdomain robustly.
+        when: MatchExpr::Any {
+            exprs: vec![
+                MatchExpr::HeaderContains {
+                    header: "From".into(),
+                    substring: "hetzner.".into(),
+                },
+                MatchExpr::HeaderContains {
+                    header: "From".into(),
+                    substring: "@your-server.de".into(),
+                },
             ],
         },
         action: Action::FileInto {
