@@ -119,6 +119,7 @@ impl Default for CategoryRules {
     fn default() -> Self {
         Self {
             rules: vec![
+                rule_spam_to_junk(),
                 rule_internal_source(),
                 rule_2fa_inbox(),
                 rule_important_security(),
@@ -137,8 +138,6 @@ impl Default for CategoryRules {
                 rule_forums_dev_communities(),
                 rule_forums_googlegroups(),
                 rule_updates_senders(),
-                rule_updates_subject_keywords(),
-                rule_updates_noreply_sender(),
             ],
         }
     }
@@ -151,6 +150,28 @@ impl CategoryRules {
     #[must_use]
     pub fn to_sieve(&self) -> String {
         self.to_sieve_with(SieveEmitOptions::default())
+    }
+
+    /// The ruleset actually DEPLOYED to the live server (2026-06-15, per
+    /// operator request "inbox should have most things; if you don't know
+    /// where mail should go, it should go to inbox; All Mail = everything
+    /// except spam").
+    ///
+    /// Deliberately minimal: spam → Junk, 2FA codes flagged but kept in
+    /// INBOX, and EVERYTHING ELSE falls through to INBOX (implicit keep).
+    /// `Default` remains the full rule catalogue (used by tests and as the
+    /// menu of rules we can re-enable later).
+    #[must_use]
+    pub fn deployed() -> Self {
+        Self {
+            rules: vec![
+                rule_spam_to_junk(),
+                rule_2fa_inbox(),
+                rule_sacredvote(),
+                rule_hetzner(),
+                rule_prime_alerts(),
+            ],
+        }
     }
 
     /// Emit a complete Sieve script with explicit options.
@@ -366,6 +387,99 @@ fn sieve_escape(s: &str) -> String {
 }
 
 // --- default rules ---------------------------------------------------
+
+/// Spam tagged by rspamd (which adds `X-Spam: Yes`) is filed straight to
+/// Junk. Highest score so it wins over From-domain rules — rspamd already
+/// accounts for spoofing/SPF/DKIM/DMARC, so its verdict beats a forged
+/// `From:`. Junk is still delivered and archived (never rejected), so no
+/// mail is ever lost.
+fn rule_spam_to_junk() -> CategoryRule {
+    CategoryRule {
+        id: "spam_to_junk".into(),
+        display_name: "rspamd-tagged spam → Junk".into(),
+        when: MatchExpr::HeaderContains {
+            header: "X-Spam".into(),
+            substring: "Yes".into(),
+        },
+        action: Action::FileInto {
+            folder: "Junk".into(),
+        },
+        score: 110,
+        stop_on_match: true,
+    }
+}
+
+/// Mail from the SacredVote platform (sacred.vote) or org (sacredvote.org) →
+/// a dedicated SacredVote folder. Includes the mail-orchestrator notify mails,
+/// which originate from sacred.vote addresses.
+fn rule_sacredvote() -> CategoryRule {
+    CategoryRule {
+        id: "sacredvote".into(),
+        display_name: "SacredVote mail → SacredVote".into(),
+        when: MatchExpr::FromDomainIn {
+            domains: vec!["@sacred.vote".into(), "@sacredvote.org".into()],
+        },
+        action: Action::FileInto {
+            folder: "SacredVote".into(),
+        },
+        score: 60,
+        stop_on_match: true,
+    }
+}
+
+/// Mail from Hetzner (the hosting provider) → a dedicated Hetzner folder.
+fn rule_hetzner() -> CategoryRule {
+    CategoryRule {
+        id: "hetzner".into(),
+        display_name: "Hetzner mail → Hetzner".into(),
+        when: MatchExpr::FromDomainIn {
+            domains: vec![
+                "@hetzner.com".into(),
+                "@hetzner.cloud".into(),
+                "@your-server.de".into(),
+            ],
+        },
+        action: Action::FileInto {
+            folder: "Hetzner".into(),
+        },
+        score: 60,
+        stop_on_match: true,
+    }
+}
+
+/// Operational alerts from the prime host itself / the mail-orchestrator →
+/// a dedicated "Prime Alerts" folder. Matches the prime hostname + internal
+/// domains (NOT @plausiden.com, so normal mail is untouched).
+fn rule_prime_alerts() -> CategoryRule {
+    CategoryRule {
+        id: "prime_alerts".into(),
+        display_name: "Prime / mail-orchestrator alerts → Prime Alerts".into(),
+        when: MatchExpr::Any {
+            exprs: vec![
+                MatchExpr::FromDomainIn {
+                    domains: vec![
+                        "@plausiden-prime".into(),
+                        "@plausiden.internal".into(),
+                        "@prime.plausiden.com".into(),
+                    ],
+                },
+                MatchExpr::HeaderContains {
+                    header: "From".into(),
+                    substring: "plausiden-prime".into(),
+                },
+                MatchExpr::HeaderContains {
+                    header: "From".into(),
+                    substring: "mail-orchestrator".into(),
+                },
+            ],
+        },
+        action: Action::FileInto {
+            folder: "Prime Alerts".into(),
+        },
+        score: 60,
+        stop_on_match: true,
+    }
+}
 
 fn rule_internal_source() -> CategoryRule {
     CategoryRule {
@@ -1222,75 +1336,11 @@ fn rule_updates_senders() -> CategoryRule {
     }
 }
 
-fn rule_updates_subject_keywords() -> CategoryRule {
-    CategoryRule {
-        id: "updates_subject_keywords".into(),
-        display_name: "Updates — transactional subject keywords".into(),
-        when: MatchExpr::SubjectContainsAny {
-            needles: vec![
-                "receipt".into(),
-                "invoice".into(),
-                "your order".into(),
-                "shipping".into(),
-                "delivery".into(),
-                "confirmation".into(),
-                "verify".into(),
-                "verification".into(),
-                "verification code".into(),
-                "password reset".into(),
-                "two-factor".into(),
-                "2FA".into(),
-                "one-time".into(),
-                "otp".into(),
-            ],
-        },
-        action: Action::FileInto {
-            folder: "Updates".into(),
-        },
-        score: 50,
-        stop_on_match: true,
-    }
-}
-
-/// Catch transactional / no-reply senders by From-header substring.
-/// Lower priority than the explicit domain list so a known service
-/// provider still wins, but high enough to file generic
-/// `noreply@example.org` mail into Updates rather than letting it
-/// fall through to (none).
-fn rule_updates_noreply_sender() -> CategoryRule {
-    CategoryRule {
-        id: "updates_noreply_sender".into(),
-        display_name: "Updates — From contains noreply / no-reply / donotreply".into(),
-        when: MatchExpr::Any {
-            exprs: vec![
-                MatchExpr::HeaderContains {
-                    header: "From".into(),
-                    substring: "noreply".into(),
-                },
-                MatchExpr::HeaderContains {
-                    header: "From".into(),
-                    substring: "no-reply".into(),
-                },
-                MatchExpr::HeaderContains {
-                    header: "From".into(),
-                    substring: "donotreply".into(),
-                },
-                MatchExpr::HeaderContains {
-                    header: "From".into(),
-                    substring: "do-not-reply".into(),
-                },
-            ],
-        },
-        action: Action::FileInto {
-            folder: "Updates".into(),
-        },
-        // Score 45 — sits below subject_keywords (50) so an order
-        // confirmation from `noreply@…` still routes via the more
-        // semantic keyword rule. Both end in Updates anyway.
-        score: 45,
-        stop_on_match: true,
-    }
-}
+// NOTE: `updates_subject_keywords` (score 50) and `updates_noreply_sender`
+// (score 45) were removed 2026-06-14 per operator request: transactional
+// and generic no-reply mail now STAYS in INBOX instead of being swept into
+// Updates. Only explicit category senders (`updates_senders`) and true bulk
+// (List-Unsubscribe → Promotions, List-Id → Forums) are auto-filed.
 
 #[cfg(test)]
 mod tests {
@@ -1413,6 +1463,83 @@ mod tests {
         let h = vec![];
         let hits = rules.evaluate(&ctx(&h, "alerts@plausiden.com", "Disk usage 87%"));
         assert_eq!(hits.first().unwrap().id, "internal_source");
+    }
+
+    #[test]
+    fn rspamd_tagged_spam_routes_to_junk() {
+        // rspamd adds `X-Spam: Yes`; that must beat From-domain rules.
+        let rules = CategoryRules::default();
+        let h = vec![("x-spam".into(), "Yes".into())];
+        let hits = rules.evaluate(&ctx(&h, "ceo@plausiden.com", "Wire transfer urgent"));
+        let first = hits.first().expect("a rule fires");
+        assert_eq!(
+            first.id, "spam_to_junk",
+            "spam verdict beats even a spoofed internal From"
+        );
+        assert_eq!(
+            first.action,
+            Action::FileInto {
+                folder: "Junk".into()
+            }
+        );
+    }
+
+    #[test]
+    fn generic_noreply_transactional_stays_in_inbox() {
+        // Tightened 2026-06-14: generic no-reply / transactional mail with no
+        // bulk markers is no longer swept into Updates — it stays in INBOX.
+        let rules = CategoryRules::default();
+        let h = vec![];
+        let hits = rules.evaluate(&ctx(
+            &h,
+            "noreply@some-service.example",
+            "Your statement is ready",
+        ));
+        let inbox_ok = hits.is_empty()
+            || hits.first().unwrap().action
+                == Action::FileInto {
+                    folder: "INBOX".into(),
+                };
+        assert!(
+            inbox_ok,
+            "generic no-reply transactional should remain in INBOX, got {:?}",
+            hits.first()
+        );
+    }
+
+    #[test]
+    fn deployed_ruleset_is_minimal_inbox_default() {
+        // Operator policy 2026-06-15: only spam leaves INBOX; everything else
+        // (GitHub, job alerts, receipts, unknown) falls through to INBOX.
+        let d = CategoryRules::deployed();
+        // spam -> Junk
+        let spam = vec![("x-spam".to_string(), "Yes".to_string())];
+        assert_eq!(
+            d.evaluate(&ctx(&spam, "x@y.example", "hi"))
+                .first()
+                .unwrap()
+                .id,
+            "spam_to_junk"
+        );
+        // GitHub CI, Indeed job alert, plain marketing: NO diversion -> INBOX
+        for (from, subj, hdrs) in [
+            ("notifications@github.com", "Run failed: audit", vec![]),
+            (
+                "donotreply@jobalert.indeed.com",
+                "5 new jobs",
+                vec![("list-unsubscribe".to_string(), "<mailto:x>".to_string())],
+            ),
+            (
+                "news@store.example",
+                "50% off",
+                vec![("list-unsubscribe".to_string(), "<mailto:x>".to_string())],
+            ),
+        ] {
+            assert!(
+                d.evaluate(&ctx(&hdrs, from, subj)).is_empty(),
+                "{from} should fall through to INBOX under deployed ruleset"
+            );
+        }
     }
 
     /// Vultr default hostnames vary per image (.guest, .vultr, .local).
