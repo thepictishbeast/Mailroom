@@ -388,18 +388,32 @@ fn sieve_escape(s: &str) -> String {
 
 // --- default rules ---------------------------------------------------
 
-/// Spam tagged by rspamd (which adds `X-Spam: Yes`) is filed straight to
-/// Junk. Highest score so it wins over From-domain rules — rspamd already
-/// accounts for spoofing/SPF/DKIM/DMARC, so its verdict beats a forged
-/// `From:`. Junk is still delivered and archived (never rejected), so no
-/// mail is ever lost.
+/// Spam tagged by rspamd is filed straight to Junk. Highest score so it
+/// wins over From-domain rules — rspamd already accounts for
+/// spoofing/SPF/DKIM/DMARC, so its verdict beats a forged `From:`. Junk is
+/// still delivered and archived (never rejected), so no mail is ever lost.
+///
+/// Match EITHER header rspamd stamps at the `add header` action (verified on
+/// the live server, score ≥ 6): the milter_headers `spam-header` module adds
+/// `X-Spam: Yes`, and the `x-spam-status` module adds `X-Spam-Status: Yes,
+/// score=…` (SpamAssassin-compat). Both appear together today, but matching
+/// either keeps spam filing to Junk even if one module is later dropped from
+/// the rspamd config — a resilience guard on the pipeline's load-bearing rule.
 fn rule_spam_to_junk() -> CategoryRule {
     CategoryRule {
         id: "spam_to_junk".into(),
         display_name: "rspamd-tagged spam → Junk".into(),
-        when: MatchExpr::HeaderContains {
-            header: "X-Spam".into(),
-            substring: "Yes".into(),
+        when: MatchExpr::Any {
+            exprs: vec![
+                MatchExpr::HeaderContains {
+                    header: "X-Spam".into(),
+                    substring: "Yes".into(),
+                },
+                MatchExpr::HeaderContains {
+                    header: "X-Spam-Status".into(),
+                    substring: "Yes".into(),
+                },
+            ],
         },
         action: Action::FileInto {
             folder: "Junk".into(),
