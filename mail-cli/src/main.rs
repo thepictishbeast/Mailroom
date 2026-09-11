@@ -87,6 +87,10 @@ enum Commands {
         /// Where archived copies go, e.g. archive@example.com.
         #[arg(long)]
         archive_mailbox: Option<String>,
+        /// One login allowed to send as ANY hosted address. Concentrates
+        /// authority in a single password on purpose — see tenant.rs.
+        #[arg(long)]
+        superuser: Option<String>,
     },
 
     /// Show delivery log from the orchestrator database.
@@ -231,7 +235,13 @@ fn main() -> Result<()> {
             vmailbox,
             own_domains,
             archive_mailbox,
-        } => cmd_tenant_maps(&vmailbox, &own_domains, archive_mailbox.as_deref()),
+            superuser,
+        } => cmd_tenant_maps(
+            &vmailbox,
+            &own_domains,
+            archive_mailbox.as_deref(),
+            superuser.as_deref(),
+        ),
         Commands::Log { limit, mailbox } => cmd_log(limit, mailbox.as_deref()),
         Commands::TestSmtp { host, port } => cmd_test_smtp(&host, port),
         Commands::EmitCategories {
@@ -919,6 +929,7 @@ fn cmd_tenant_maps(
     vmailbox: &std::path::Path,
     own_domains: &[String],
     archive_mailbox: Option<&str>,
+    superuser: Option<&str>,
 ) -> anyhow::Result<()> {
     let lines = mail_config::postfix::read_vmailbox(vmailbox)?;
     let domains = mail_config::tenant::domains_from_vmailbox(&lines);
@@ -955,10 +966,21 @@ fn cmd_tenant_maps(
     }
 
     println!("\n# ===== /etc/postfix/sender_login =====");
-    print!(
-        "{}",
-        mail_config::tenant::SenderPolicy::self_owned(&domains).to_login_map()
-    );
+    let mut policy = mail_config::tenant::SenderPolicy::self_owned(&domains);
+    if let Some(su) = superuser {
+        // A superuser that is not a real mailbox cannot authenticate, so the
+        // fallback keys would silently permit nobody.
+        let exists = domains
+            .iter()
+            .any(|d| d.mailboxes.iter().any(|m| m.address(&d.name) == su));
+        anyhow::ensure!(
+            exists,
+            "--superuser {su} is not a mailbox in {}",
+            vmailbox.display()
+        );
+        policy = policy.with_superuser(su);
+    }
+    print!("{}", policy.to_login_map());
 
     if let Some(mbox) = archive_mailbox {
         println!("\n# ===== /etc/postfix/{{recipient_bcc,sender_bcc}} =====");
