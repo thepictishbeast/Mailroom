@@ -978,7 +978,16 @@ fn cmd_tenant_maps(
             "--superuser {su} is not a mailbox in {}",
             vmailbox.display()
         );
-        policy = policy.with_superuser(su);
+        anyhow::ensure!(
+            !own_domains.is_empty(),
+            "--superuser needs at least one --own-domain to administer; with none it \
+             is granted nothing and the map looks configured while doing nothing"
+        );
+        // Scope is the --own-domain list: the operator administers the
+        // domains you own and no tenant's. Paul, 2026-09-11: "william
+        // should only be able to send as every plausiden email not
+        // literally every email."
+        policy = policy.with_superuser(su, own_domains);
     }
     print!("{}", policy.to_login_map());
 

@@ -76,19 +76,37 @@ impl ArchivePolicy {
     }
 }
 
+/// An operator login and the domains it administers.
+#[derive(Debug, Clone)]
+pub struct Superuser {
+    /// The login, e.g. `william@plausiden.com`.
+    pub login: String,
+    /// Domains it may send as any address on. NOT every hosted domain —
+    /// a tenant's domain must be absent unless they have agreed to it.
+    pub domains: Vec<String>,
+}
+
+impl Superuser {
+    /// True when this operator administers `domain`.
+    #[must_use]
+    pub fn administers(&self, domain: &str) -> bool {
+        self.domains.iter().any(|d| d == domain)
+    }
+}
+
 /// Who may use which envelope sender on an authenticated session.
 #[derive(Debug, Clone)]
 pub struct SenderPolicy {
-    /// A login permitted to send as ANY address on ANY hosted domain.
+    /// An operator login permitted to send as any address on the domains
+    /// it administers.
     ///
-    /// Paul, 2026-09-11: "only william should be able to be sent as any
-    /// email". One operator account that can send as anything is genuinely
-    /// useful — answering as `security@`, sending for a tenant who asked —
-    /// and it is a real concentration of authority: if this one password
-    /// leaks, the attacker can send as every address the server hosts,
-    /// including other people's domains. Deliberate, so it is a named
-    /// field rather than an extra entry nobody notices.
-    pub superuser: Option<String>,
+    /// Paul, 2026-09-11: "william should only be able to send as every
+    /// plausiden email not literally every email." The scope is the point.
+    /// An operator who can answer as `security@` or `noreply@` on their own
+    /// domain is doing their job; one who can send as a client's address is
+    /// a different thing, and hosting someone's mail should not quietly
+    /// include the power to write as them.
+    pub superuser: Option<Superuser>,
     /// Per-domain: the logins permitted to send as any address on it.
     ///
     /// Keyed by domain rather than by address so a tenant can send as
@@ -120,10 +138,13 @@ impl SenderPolicy {
         }
     }
 
-    /// Name the one login allowed to send as anything hosted here.
+    /// Name the operator login and the domains it administers.
     #[must_use]
-    pub fn with_superuser(mut self, login: impl Into<String>) -> Self {
-        self.superuser = Some(login.into());
+    pub fn with_superuser(mut self, login: impl Into<String>, domains: &[String]) -> Self {
+        self.superuser = Some(Superuser {
+            login: login.into(),
+            domains: domains.to_vec(),
+        });
         self
     }
 
@@ -144,33 +165,47 @@ impl SenderPolicy {
         );
         if let Some(su) = &self.superuser {
             out.push_str(&format!(
-                "# {su} is the superuser: it is listed against every address below,\n\
-                 # so it may send as anything this server hosts.\n\n"
+                "# operator: {} — may send as any address on {}.\n\
+                 # It is NOT added to any other domain's keys; hosting a domain\n\
+                 # does not include the power to write as its owner.\n\n",
+                su.login,
+                su.domains.join(", ")
             ));
         }
         for (domain, logins) in &self.domain_owners {
+            let op = self
+                .superuser
+                .as_ref()
+                .filter(|su| su.administers(domain))
+                .map(|su| su.login.clone());
+
             // Per-ADDRESS keys, not one key per domain: each mailbox gets
-            // itself plus the superuser, so team@ can still send as team@
-            // without also being able to send as security@.
+            // itself, plus the operator only where it administers. So team@
+            // can still send as team@ without also sending as security@.
             for owner in logins {
                 let mut allowed = vec![owner.clone()];
-                if let Some(su) = &self.superuser {
-                    if su != owner {
-                        allowed.push(su.clone());
+                if let Some(o) = &op {
+                    if o != owner {
+                        allowed.push(o.clone());
                     }
                 }
                 out.push_str(&format!("{}\t{}\n", owner, allowed.join(", ")));
             }
             // Fallback for addresses with no mailbox of their own: aliases,
-            // and anything added later. Superuser only, so a new alias
-            // cannot be spoofed by an unrelated tenant before anyone
-            // notices it exists.
-            match &self.superuser {
-                Some(su) => out.push_str(&format!("@{domain}\t{su}\n")),
-                None if logins.is_empty() => out.push_str(&format!(
+            // and anything added later.
+            match (&op, logins.is_empty()) {
+                // Operator alone, so an alias added later cannot be spoofed
+                // by an unrelated mailbox before anyone notices it exists.
+                (Some(o), _) => out.push_str(&format!("@{domain}\t{o}\n")),
+                // A tenant domain with no operator: no fallback key at all.
+                // An empty value would match every address on the domain and
+                // permit nobody, which reads as "configured" and is not.
+                (None, false) => out.push_str(&format!(
+                    "# @{domain} — no operator; only the addresses above may be sent as\n"
+                )),
+                (None, true) => out.push_str(&format!(
                     "# @{domain} — no mailboxes, so no login may send as it\n"
                 )),
-                None => out.push_str(&format!("@{}\t{}\n", domain, logins.join(", "))),
             }
             out.push('\n');
         }
@@ -189,11 +224,14 @@ impl SenderPolicy {
     /// True when `login` may send as an address on `domain`.
     #[must_use]
     pub fn may_send_as(&self, login: &str, domain: &str) -> bool {
-        // The superuser may send as any HOSTED domain. Not a wildcard over
-        // the internet: an unhosted domain has no map entry, so Postfix
-        // finds no owner and the mismatch check refuses it for everyone.
-        if self.owners_of(domain).is_some() && self.superuser.as_deref() == Some(login) {
-            return true;
+        // The operator may send as any address on the domains it
+        // ADMINISTERS. Not every hosted domain, and not the whole
+        // internet: an unadministered or unhosted domain falls through to
+        // the ordinary per-address check below.
+        if let Some(su) = &self.superuser {
+            if su.login == login && su.administers(domain) && self.owners_of(domain).is_some() {
+                return true;
+            }
         }
         self.owners_of(domain)
             .is_some_and(|l| l.iter().any(|o| o == login))
@@ -294,19 +332,60 @@ mod tests {
     }
 
     #[test]
-    fn the_superuser_may_send_as_any_hosted_domain() {
-        // Paul, 2026-09-11: "only william should be able to be sent as any
-        // email." This overrides the symmetric default above, on purpose.
-        let p =
-            SenderPolicy::self_owned(&ours_and_theirs()).with_superuser("william@plausiden.com");
+    fn the_operator_may_send_as_any_address_on_a_domain_it_administers() {
+        let p = SenderPolicy::self_owned(&ours_and_theirs())
+            .with_superuser("william@plausiden.com", &["plausiden.com".to_owned()]);
         assert!(p.may_send_as("william@plausiden.com", "plausiden.com"));
-        assert!(p.may_send_as("william@plausiden.com", "breeziside.com"));
+    }
+
+    #[test]
+    fn the_operator_may_not_send_as_a_tenant_it_merely_hosts() {
+        // Paul, 2026-09-11, correcting the previous revision: "william
+        // should only be able to send as every plausiden email not
+        // literally every email." Hosting someone's domain must not
+        // silently include the power to write as them.
+        let p = SenderPolicy::self_owned(&ours_and_theirs())
+            .with_superuser("william@plausiden.com", &["plausiden.com".to_owned()]);
+        assert!(!p.may_send_as("william@plausiden.com", "breeziside.com"));
+        let m = p.to_login_map();
+        assert!(
+            !m.contains("golf@breeziside.com\tgolf@breeziside.com, william@plausiden.com"),
+            "operator must not appear on a tenant's address:\n{m}"
+        );
+        assert!(
+            !m.contains("@breeziside.com\twilliam@plausiden.com"),
+            "operator must not hold the tenant's fallback key:\n{m}"
+        );
+    }
+
+    #[test]
+    fn a_tenant_domain_gets_no_fallback_key_at_all() {
+        let p = SenderPolicy::self_owned(&ours_and_theirs())
+            .with_superuser("william@plausiden.com", &["plausiden.com".to_owned()]);
+        let m = p.to_login_map();
+        assert!(m.contains("# @breeziside.com — no operator"), "\n{m}");
+        assert!(
+            m.contains("golf@breeziside.com\tgolf@breeziside.com\n"),
+            "\n{m}"
+        );
+    }
+
+    #[test]
+    fn an_operator_over_two_of_its_own_domains_covers_both() {
+        let mut ds = ours_and_theirs();
+        ds.push(dom("plausiden.org", &["hello"]));
+        let p = SenderPolicy::self_owned(&ds).with_superuser(
+            "william@plausiden.com",
+            &["plausiden.com".to_owned(), "plausiden.org".to_owned()],
+        );
+        assert!(p.may_send_as("william@plausiden.com", "plausiden.org"));
+        assert!(!p.may_send_as("william@plausiden.com", "breeziside.com"));
     }
 
     #[test]
     fn only_the_superuser_gets_that_power() {
-        let p =
-            SenderPolicy::self_owned(&ours_and_theirs()).with_superuser("william@plausiden.com");
+        let p = SenderPolicy::self_owned(&ours_and_theirs())
+            .with_superuser("william@plausiden.com", &["plausiden.com".to_owned()]);
         // team@ is on OUR domain and still cannot reach a tenant's.
         assert!(!p.may_send_as("team@plausiden.com", "breeziside.com"));
         // ...and still cannot send as another address on its own domain,
@@ -319,8 +398,8 @@ mod tests {
         // A domain we do not host has no map entry at all, so the mismatch
         // check refuses it for everyone. Worth pinning: "send as anything"
         // is easy to read as "send as gmail.com".
-        let p =
-            SenderPolicy::self_owned(&ours_and_theirs()).with_superuser("william@plausiden.com");
+        let p = SenderPolicy::self_owned(&ours_and_theirs())
+            .with_superuser("william@plausiden.com", &["plausiden.com".to_owned()]);
         assert!(!p.may_send_as("william@plausiden.com", "gmail.com"));
         assert!(!p.may_send_as("william@plausiden.com", "irs.gov"));
     }
@@ -328,10 +407,11 @@ mod tests {
     #[test]
     fn the_map_gives_each_address_itself_plus_the_superuser() {
         let m = SenderPolicy::self_owned(&ours_and_theirs())
-            .with_superuser("william@plausiden.com")
+            .with_superuser("william@plausiden.com", &["plausiden.com".to_owned()])
             .to_login_map();
         assert!(m.contains("team@plausiden.com\tteam@plausiden.com, william@plausiden.com"));
-        assert!(m.contains("golf@breeziside.com\tgolf@breeziside.com, william@plausiden.com"));
+        // NOT the tenant's address — see the_operator_may_not_send_as_a_tenant.
+        assert!(m.contains("golf@breeziside.com\tgolf@breeziside.com\n"));
         // The superuser is not listed twice against its own address.
         assert!(
             m.contains("william@plausiden.com\twilliam@plausiden.com\n"),
@@ -344,10 +424,9 @@ mod tests {
         // security@ has no mailbox in this fixture. The @domain key must
         // not hand it to every mailbox on the domain.
         let m = SenderPolicy::self_owned(&ours_and_theirs())
-            .with_superuser("william@plausiden.com")
+            .with_superuser("william@plausiden.com", &["plausiden.com".to_owned()])
             .to_login_map();
         assert!(m.contains("@plausiden.com\twilliam@plausiden.com\n"));
-        assert!(m.contains("@breeziside.com\twilliam@plausiden.com\n"));
     }
 
     #[test]
@@ -359,10 +438,35 @@ mod tests {
     }
 
     #[test]
-    fn the_login_map_lists_every_hosted_domain() {
+    fn the_login_map_gives_every_mailbox_its_own_key() {
+        // This test used to assert a per-DOMAIN key listing every mailbox
+        // on it. That was looser than it looked: it let team@ send as
+        // security@ purely because both are on plausiden.com. Keys are now
+        // per address, so each mailbox may send as itself and no more.
         let m = SenderPolicy::self_owned(&ours_and_theirs()).to_login_map();
-        assert!(m.contains("@plausiden.com\twilliam@plausiden.com, team@plausiden.com"));
-        assert!(m.contains("@breeziside.com\tgolf@breeziside.com, dmarc@breeziside.com"));
+        for a in [
+            "william@plausiden.com",
+            "team@plausiden.com",
+            "golf@breeziside.com",
+            "dmarc@breeziside.com",
+        ] {
+            assert!(
+                m.contains(&format!("{a}\t{a}\n")),
+                "{a} missing its own key:\n{m}"
+            );
+        }
+        // And with no operator named, no domain-wide fallback exists at all.
+        //
+        // Checked line-anchored, not by substring: "team@plausiden.com\t..."
+        // CONTAINS "@plausiden.com\t", so a contains() check here passes
+        // for the wrong reason and would keep passing if a real fallback
+        // key appeared.
+        assert!(
+            !m.lines().any(|l| l.starts_with("@plausiden.com\t")),
+            "no domain-wide key should exist without an operator:\n{m}"
+        );
+        assert!(m.contains("# @plausiden.com — no operator"), "\n{m}");
+        assert!(m.contains("# @breeziside.com — no operator"), "\n{m}");
     }
 
     #[test]
