@@ -68,6 +68,27 @@ enum Commands {
         domain: String,
     },
 
+    /// Emit the multi-tenant isolation maps derived from the DEPLOYED
+    /// Postfix vmailbox, so they can be diffed against what is live.
+    ///
+    /// Prints nothing to disk. Two settings that are harmless on a
+    /// single-tenant server become leaks the moment a second domain is
+    /// hosted: a global `always_bcc` copies a tenant's mail into your
+    /// archive, and an empty `smtpd_sender_login_maps` lets any mailbox
+    /// send as any address. These are the maps that close both.
+    TenantMaps {
+        /// Deployed vmailbox to derive the tenant list from.
+        #[arg(long, default_value = "/etc/postfix/vmailbox")]
+        vmailbox: PathBuf,
+        /// Domains you OWN and may archive. Repeatable. Anything not
+        /// listed is a tenant and is never copied.
+        #[arg(long = "own-domain")]
+        own_domains: Vec<String>,
+        /// Where archived copies go, e.g. archive@example.com.
+        #[arg(long)]
+        archive_mailbox: Option<String>,
+    },
+
     /// Show delivery log from the orchestrator database.
     Log {
         /// Maximum number of entries to show.
@@ -206,6 +227,11 @@ fn main() -> Result<()> {
         Commands::GenerateSieve { domain, write } => cmd_generate_sieve(&domain, write),
         Commands::DkimStatus { domain } => cmd_dkim_status(&domain),
         Commands::Vmailbox { domain } => cmd_vmailbox(&domain),
+        Commands::TenantMaps {
+            vmailbox,
+            own_domains,
+            archive_mailbox,
+        } => cmd_tenant_maps(&vmailbox, &own_domains, archive_mailbox.as_deref()),
         Commands::Log { limit, mailbox } => cmd_log(limit, mailbox.as_deref()),
         Commands::TestSmtp { host, port } => cmd_test_smtp(&host, port),
         Commands::EmitCategories {
@@ -359,7 +385,7 @@ fn cmd_classify() -> Result<()> {
         subject: &subject,
     };
 
-    let rules = CategoryRules::default();
+    let rules = CategoryRules::deployed();
     let hits = rules.evaluate(&ctx);
 
     println!("From:    {from_addr}");
@@ -586,7 +612,7 @@ fn cmd_emit_categories(
     let opts = SieveEmitOptions {
         audit_header: audit_headers,
     };
-    let rendered = CategoryRules::default().to_sieve_with(opts);
+    let rendered = CategoryRules::deployed().to_sieve_with(opts);
     render_and_write("categories.sieve", output, &rendered, stdout, force).map(|_| ())
 }
 
@@ -617,7 +643,7 @@ fn cmd_emit_all(stdout: bool, audit_headers: bool, force: bool) -> Result<()> {
     let mb_path = PathBuf::from(DEFAULT_MAILBOXES_CONF);
     let runtime_path = PathBuf::from(DEFAULT_SIEVE_RUNTIME_CONF);
 
-    let cats_rendered = CategoryRules::default().to_sieve_with(SieveEmitOptions {
+    let cats_rendered = CategoryRules::deployed().to_sieve_with(SieveEmitOptions {
         audit_header: audit_headers,
     });
     let mb_rendered = MailboxLayout::default().to_dovecot_conf();
@@ -884,6 +910,68 @@ fn cmd_vmailbox(domain: &str) -> Result<()> {
             }
         }
         Err(e) => println!("  Error reading vmailbox: {}", e),
+    }
+    Ok(())
+}
+
+/// Emit the tenant-isolation maps derived from the deployed vmailbox.
+fn cmd_tenant_maps(
+    vmailbox: &std::path::Path,
+    own_domains: &[String],
+    archive_mailbox: Option<&str>,
+) -> anyhow::Result<()> {
+    let lines = mail_config::postfix::read_vmailbox(vmailbox)?;
+    let domains = mail_config::tenant::domains_from_vmailbox(&lines);
+
+    println!(
+        "# derived {} hosted domain(s) from {}",
+        domains.len(),
+        vmailbox.display()
+    );
+    for d in &domains {
+        let owned = own_domains.iter().any(|o| o == &d.name);
+        println!(
+            "#   {:<24} {:>2} mailbox(es)  {}",
+            d.name,
+            d.mailboxes.len(),
+            if owned { "OURS" } else { "tenant" }
+        );
+    }
+
+    let unknown: Vec<&String> = own_domains
+        .iter()
+        .filter(|o| !domains.iter().any(|d| &d.name == *o))
+        .collect();
+    if !unknown.is_empty() {
+        // Silently emitting an archive key for a domain with no mailboxes
+        // would look like it worked while archiving nothing.
+        println!("#");
+        for u in unknown {
+            println!(
+                "# WARNING: --own-domain {u} has no mailbox in {}",
+                vmailbox.display()
+            );
+        }
+    }
+
+    println!("\n# ===== /etc/postfix/sender_login =====");
+    print!(
+        "{}",
+        mail_config::tenant::SenderPolicy::self_owned(&domains).to_login_map()
+    );
+
+    if let Some(mbox) = archive_mailbox {
+        println!("\n# ===== /etc/postfix/{{recipient_bcc,sender_bcc}} =====");
+        print!(
+            "{}",
+            mail_config::tenant::ArchivePolicy {
+                archived_domains: own_domains.to_vec(),
+                archive_mailbox: mbox.to_owned(),
+            }
+            .to_bcc_map()
+        );
+    } else {
+        println!("\n# (no --archive-mailbox given, so no bcc maps emitted)");
     }
     Ok(())
 }

@@ -14,6 +14,7 @@ pub mod error;
 pub mod mailbox_layout;
 pub mod postfix;
 pub mod sieve;
+pub mod tenant;
 
 pub use categories::{Action, AuditTag, CategoryRule, CategoryRules, MatchExpr, MessageContext};
 pub use domain::{Domain, Mailbox, MailboxKind};
